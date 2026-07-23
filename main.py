@@ -1,0 +1,319 @@
+import json
+import time
+import traceback
+from base_plugin import BasePlugin, MenuItemData, MenuItemType
+from android_utils import run_on_ui_thread
+from client_utils import get_last_fragment, log
+from ui.bulletin import BulletinHelper
+from ui.alert import AlertDialogBuilder
+from com.exteragram.messenger.plugins import PluginsController
+from com.exteragram.messenger.plugins.ui import PluginSettingsActivity, PluginsActivity
+from org.telegram.messenger import ApplicationLoader
+
+from data.constants import PRESET_ICONS
+from i18n.locales import _s
+from utils.helpers import (
+    _ctrl, _plugin_name, _plugin_exists, _to_py_list,
+    _open_link_key, _shortcut_norm_text, _setting_value_key,
+    _invoke_sub_fragment_callback, _run_on_plugins_queue,
+    _dialog_context, _show_dialog_safe, _sc_label, _loc_label, _shortcut_title
+)
+from utils.scanner import (
+    _plugin_ids, _has_settings_reliably, _collect_sub_fragments,
+    _collect_settings, _find_setting_item, _trigger_setting_on_change
+)
+from features.deeplink import register_deeplink_hook, copy_deeplink
+from features.quick_access import update_quick_access
+from ui.settings import build_settings_list, show_selector_dialog, show_input_dialog
+from ui.wizard import build_wizard_step1
+
+class ShortcutsPlugin(BasePlugin):
+
+    def __init__(self):
+        super().__init__()
+        self._menu_items = []
+        self._qa_mid = None
+        self._spinner = None
+        self._deeplink_unhook = None
+
+    def on_plugin_load(self):
+        try:
+            if bool(self.get_setting("auto_remove_missing", False)):
+                self._cleanup_missing_shortcuts(restore_menus=False, notify=False)
+            self._restore_shortcuts()
+            update_quick_access(self)
+            self._deeplink_unhook = register_deeplink_hook(self)
+        except Exception as e:
+            log(f"[{__id__}] on_plugin_load: {e}")
+
+    def on_plugin_unload(self):
+        self._clear_menu_items()
+        if self._qa_mid:
+            try:
+                self.remove_menu_item(self._qa_mid)
+            except:
+                pass
+        if self._deeplink_unhook:
+            try:
+                if isinstance(self._deeplink_unhook, list):
+                    for u in self._deeplink_unhook:
+                        if hasattr(u, "unhook"):
+                            u.unhook()
+                elif hasattr(self._deeplink_unhook, "unhook"):
+                    self._deeplink_unhook.unhook()
+            except:
+                pass
+            self._deeplink_unhook = None
+
+    def create_settings(self):
+        try:
+            return build_settings_list(self)
+        except Exception as e:
+            log(f"[{__id__}] create_settings: {e}\n{traceback.format_exc()}")
+            return [Header(text=_s("shortcuts")), Divider(text=str(e))]
+
+    def _on_auto_remove_missing_toggle(self, enabled):
+        if enabled:
+            self._cleanup_missing_shortcuts(restore_menus=True, notify=True)
+
+    def _cleanup_missing_shortcuts(self, restore_menus=True, notify=False):
+        sc_list = self._load_shortcuts()
+        filtered = [sc for sc in sc_list if _plugin_exists(sc.get("plugin_id", ""))]
+        removed = len(sc_list) - len(filtered)
+        if removed <= 0:
+            return 0
+        self._save_shortcuts(filtered)
+        if restore_menus:
+            self._restore_shortcuts()
+        if notify:
+            run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_s('missing_shortcuts_removed')}: {removed}"))
+        return removed
+
+    def _open_self_settings(self):
+        def _do():
+            try:
+                plugin = _ctrl().plugins.get(__id__)
+                if plugin:
+                    frag = get_last_fragment()
+                    if frag:
+                        frag.presentFragment(PluginSettingsActivity(plugin))
+            except Exception as e:
+                log(f"[{__id__}] _open_self_settings: {e}")
+        run_on_ui_thread(_do)
+
+    def _show_spinner(self):
+        def _do():
+            try:
+                fragment = get_last_fragment()
+                ctx = fragment.getParentActivity() if fragment else ApplicationLoader.applicationContext
+                if ctx is None:
+                    return
+                if self._spinner and self._spinner.get_dialog() and self._spinner.get_dialog().isShowing():
+                    return
+                self._spinner = AlertDialogBuilder(ctx, AlertDialogBuilder.ALERT_TYPE_SPINNER)
+                self._spinner.set_cancelable(False)
+                self._spinner.set_canceled_on_touch_outside(False)
+                self._spinner.create()
+                self._spinner.show()
+            except Exception as e:
+                log(f"[{__id__}] show spinner: {e}")
+        run_on_ui_thread(_do)
+
+    def _dismiss_spinner(self):
+        def _do():
+            try:
+                if self._spinner and self._spinner.get_dialog() and self._spinner.get_dialog().isShowing():
+                    self._spinner.dismiss()
+            except Exception as e:
+                log(f"[{__id__}] dismiss spinner: {e}")
+            self._spinner = None
+        run_on_ui_thread(_do, 250)
+
+    def _with_spinner(self, fn):
+        try:
+            self._show_spinner()
+            time.sleep(0.08)
+            return fn()
+        finally:
+            self._dismiss_spinner()
+
+    # ========== EXECUTION ==========
+    def _exec_shortcut(self, sc):
+        t = sc.get("type", "toggle_plugin")
+        pid = sc.get("plugin_id", "")
+
+        if not _plugin_exists(pid):
+            if bool(self.get_setting("auto_remove_missing", False)):
+                self._cleanup_missing_shortcuts(restore_menus=True, notify=False)
+            run_on_ui_thread(lambda: BulletinHelper.show_info(f"{pid}: {_s('plugin_not_found')}"))
+            return
+
+        if t == "toggle_plugin":
+            plugin = _ctrl().plugins.get(pid)
+            if plugin:
+                self._toggle(pid, _plugin_name(pid), not bool(plugin.isEnabled()))
+
+        elif t == "open_settings":
+            sub = sc.get("sub_fragment", "")
+            self._open_settings_or_subfragment(pid, sub_fragment=sub)
+
+        elif t == "operate_setting":
+            sk = sc.get("setting_key", "")
+            st = sc.get("setting_type", "switch")
+            vk = _setting_value_key(sc)
+
+            if st == "switch":
+                try:
+                    cur = _ctrl().getPluginSettingBoolean(pid, vk, False)
+                except:
+                    cur = False
+                value = not bool(cur)
+                _ctrl().setPluginSetting(pid, vk, value)
+                _trigger_setting_on_change(pid, sc, value)
+                run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_plugin_name(pid)}: {('ON' if value else 'OFF')}"))
+            elif st == "selector":
+                opts = sc.get("setting_items") or sc.get("items") or []
+                if not opts:
+                    try:
+                        for setting in _collect_settings(pid):
+                            if _setting_value_key(setting) == vk:
+                                opts = setting.get("items") or []
+                                break
+                    except Exception as e:
+                        log(f"[{__id__}] selector items fallback: {e}")
+                show_selector_dialog(self, pid, vk, _shortcut_title(sc), opts, sc)
+            elif st == "input":
+                show_input_dialog(self, pid, vk, _shortcut_title(sc), sc)
+
+    def _toggle(self, pid, pname, enabled):
+        def _do():
+            try:
+                _ctrl().setPluginEnabled(pid, enabled, None)
+                msg = f"{pname}: ON" if enabled else f"{pname}: OFF"
+                run_on_ui_thread(lambda: BulletinHelper.show_info(msg))
+            except Exception as e:
+                log(f"[{__id__}] toggle {pid}: {e}")
+                run_on_ui_thread(lambda: BulletinHelper.show_info(str(e)))
+        import threading
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _open_settings_or_subfragment(self, pid, sub_fragment=None):
+        def _do():
+            try:
+                frag = get_last_fragment()
+                if not frag:
+                    return
+
+                ctrl = _ctrl()
+                plugin = ctrl.plugins.get(pid)
+                if not plugin:
+                    return
+                if not plugin.isEnabled():
+                    run_on_ui_thread(lambda: BulletinHelper.show_info(f"{plugin.getName()}: {_s('plugin_disabled_open_manager')}"))
+                    try:
+                        frag.presentFragment(PluginsActivity())
+                    except Exception as e:
+                        log(f"[{__id__}] open_settings disabled fallback {pid}: {e}")
+                    return
+                try:
+                    ctrl.loadPluginSettings(pid)
+                except Exception as e:
+                    log(f"[{__id__}] open_settings preload {pid}: {e}")
+
+                eng = ctrl.getPluginEngine(pid)
+                if sub_fragment:
+                    if eng:
+                        try:
+                            eng.openPluginSetting(pid, sub_fragment, frag)
+                            return
+                        except:
+                            pass
+                    frag.presentFragment(PluginSettingsActivity(plugin, sub_fragment))
+                else:
+                    if eng:
+                        try:
+                            eng.openPluginSettings(pid, frag)
+                            return
+                        except:
+                            pass
+                    frag.presentFragment(PluginSettingsActivity(plugin))
+            except Exception as e:
+                log(f"[{__id__}] open_settings_or_subfragment {pid}: {e}")
+        run_on_ui_thread(_do)
+
+    # ========== SHORTCUTS MANAGEMENT ==========
+    def _load_shortcuts(self):
+        try:
+            raw = json.loads(self.get_setting("shortcuts_json", "[]"))
+        except:
+            return []
+        if isinstance(raw, dict):
+            items = raw.get("items")
+            if isinstance(items, list):
+                raw = items
+            else:
+                legacy_items = raw.get("shortcuts")
+                raw = legacy_items if isinstance(legacy_items, list) else []
+        if not isinstance(raw, list):
+            return []
+        normalized = []
+        for sc in raw:
+            if not isinstance(sc, dict):
+                continue
+            if sc.get("type") == "operate_setting" and isinstance(sc.get("setting"), dict):
+                ref = sc.get("setting") or {}
+                merged = dict(sc)
+                merged["setting_key"] = merged.get("setting_key", ref.get("key", ""))
+                merged["setting_value_key"] = merged.get("setting_value_key", ref.get("value_key", ref.get("key", "")))
+                merged["setting_open_key"] = merged.get("setting_open_key", ref.get("open_key", merged["setting_key"]))
+                merged["setting_type"] = merged.get("setting_type", ref.get("type", "switch"))
+                normalized.append(merged)
+                continue
+            normalized.append(sc)
+        return normalized
+
+    def _save_shortcuts(self, sc_list):
+        self.set_setting("shortcuts_json", json.dumps(sc_list, ensure_ascii=False))
+
+    def _restore_shortcuts(self):
+        self._clear_menu_items()
+        for sc in self._load_shortcuts():
+            try:
+                self._register_menu(sc)
+            except Exception as e:
+                log(f"[{__id__}] restore shortcut: {e}")
+
+    def _clear_menu_items(self):
+        for mid in self._menu_items:
+            try:
+                self.remove_menu_item(mid)
+            except:
+                pass
+        self._menu_items = []
+
+    def _register_menu(self, sc):
+        label = sc.get("label") or _sc_label(sc)
+        icon = sc.get("icon") or "media_settings"
+        loc = sc.get("location", "drawer")
+        menu_types = [MenuItemType.DRAWER_MENU, MenuItemType.CHAT_ACTION_MENU] if loc == "both" else [
+            MenuItemType.DRAWER_MENU if loc == "drawer" else MenuItemType.CHAT_ACTION_MENU
+        ]
+        for mt in menu_types:
+            mid = self.add_menu_item(MenuItemData(
+                menu_type=mt,
+                text=label,
+                icon=icon,
+                priority=10,
+                on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc)
+            ))
+            if mid:
+                self._menu_items.append(mid)
+
+    def _remove_shortcut(self, idx):
+        sc_list = self._load_shortcuts()
+        if 0 <= idx < len(sc_list):
+            sc_list.pop(idx)
+            self._save_shortcuts(sc_list)
+            self._restore_shortcuts()
+            run_on_ui_thread(lambda: BulletinHelper.show_info(_s("shortcut_removed")))
+            _ctrl().loadPluginSettings(__id__)

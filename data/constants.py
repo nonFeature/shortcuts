@@ -1,0 +1,22 @@
+PRESET_ICONS = [
+    ("media_settings", "Настройки (Media Settings)"),
+    ("msg_settings", "Шестеренка (Settings)"),
+    ("msg_folders", "Папки (Folders)"),
+    ("msg_privacy", "Приватность (Privacy)"),
+    ("msg_notifications", "Уведомления (Notifications)"),
+    ("msg_secret", "Замок / Сессии (Secret / Sessions)"),
+    ("msg_theme", "Тема (Theme)"),
+    ("msg_language", "Язык (Language)"),
+    ("media_share", "Поделиться (Share)"),
+    ("msg_stats", "Статистика (Stats)"),
+    ("msg_info", "Информация (Info)"),
+    ("msg_work", "Портфель / Батарея (Work / Battery)"),
+    ("msg_channel", "Стикеры / Канал (Stickers / Channel)"),
+    ("msg_bot", "Бот (Bot)"),
+    ("msg_user", "Пользователь (User)"),
+    ("msg_palette", "Палитра (Palette)"),
+    ("msg_lock", "Блокировка (Lock)"),
+    ("msg_customize", "Кастомизация (Customize)"),
+    ("msg_media", "Данные и память (Media)"),
+    ("msg_autodelete", "Автоудаление (Autodelete)")
+]
