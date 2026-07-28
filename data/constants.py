@@ -18,5 +18,5 @@ PRESET_ICONS = [
     ("msg_lock", "Блокировка (Lock)"),
     ("msg_customize", "Кастомизация (Customize)"),
     ("msg_media", "Данные и память (Media)"),
-    ("msg_autodelete", "Автоудаление (Autodelete)")
+    ("msg_autodelete", "Автоудаление (Autodelete)"),
 ]

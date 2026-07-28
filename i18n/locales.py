@@ -45,7 +45,7 @@ STRINGS = {
         "root_settings": "Main plugin settings",
         "custom_label": "Shortcut Label",
         "custom_icon": "Icon",
-        "add_deeplink_confirm": "Add shortcut from link?"
+        "add_deeplink_confirm": "Add shortcut from link?",
     },
     "ru": {
         "shortcuts": "Ярлыки",
@@ -91,15 +91,17 @@ STRINGS = {
         "root_settings": "Главный экран настроек",
         "custom_label": "Название ярлыка",
         "custom_icon": "Иконка",
-        "add_deeplink_confirm": "Добавить этот ярлык по ссылке?"
-    }
+        "add_deeplink_confirm": "Добавить этот ярлык по ссылке?",
+    },
 }
+
 
 def _is_ru():
     try:
         return Locale.getDefault().getLanguage() == "ru"
-    except:
+    except Exception:
         return True
+
 
 def _s(key):
     lang = "ru" if _is_ru() else "en"

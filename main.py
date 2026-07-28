@@ -1,34 +1,32 @@
 import json
 import time
 import traceback
-from base_plugin import BasePlugin, MenuItemData, MenuItemType
-from android_utils import run_on_ui_thread
-from client_utils import get_last_fragment, log
-from ui.bulletin import BulletinHelper
-from ui.alert import AlertDialogBuilder
-from com.exteragram.messenger.plugins import PluginsController
-from com.exteragram.messenger.plugins.ui import PluginSettingsActivity, PluginsActivity
-from org.telegram.messenger import ApplicationLoader
 
-from data.constants import PRESET_ICONS
-from i18n.locales import _s
-from utils.helpers import (
-    _ctrl, _plugin_name, _plugin_exists, _to_py_list,
-    _open_link_key, _shortcut_norm_text, _setting_value_key,
-    _invoke_sub_fragment_callback, _run_on_plugins_queue,
-    _dialog_context, _show_dialog_safe, _sc_label, _loc_label, _shortcut_title
-)
-from utils.scanner import (
-    _plugin_ids, _has_settings_reliably, _collect_sub_fragments,
-    _collect_settings, _find_setting_item, _trigger_setting_on_change
-)
-from features.deeplink import register_deeplink_hook, copy_deeplink
+from android_utils import run_on_ui_thread
+from base_plugin import BasePlugin, MenuItemData, MenuItemType
+from client_utils import get_last_fragment, log
+from com.exteragram.messenger.plugins.ui import PluginsActivity, PluginSettingsActivity
+from org.telegram.messenger import ApplicationLoader
+from ui.alert import AlertDialogBuilder
+from ui.bulletin import BulletinHelper
+
+from features.deeplink import register_deeplink_hook
 from features.quick_access import update_quick_access
-from ui.settings import build_settings_list, show_selector_dialog, show_input_dialog
-from ui.wizard import build_wizard_step1
+from header import __id__
+from i18n.locales import _s
+from ui.settings import Divider, Header, build_settings_list, show_input_dialog, show_selector_dialog
+from utils.helpers import (
+    _ctrl,
+    _plugin_exists,
+    _plugin_name,
+    _sc_label,
+    _setting_value_key,
+    _shortcut_title,
+)
+from utils.scanner import _collect_settings, _trigger_setting_on_change
+
 
 class ShortcutsPlugin(BasePlugin):
-
     def __init__(self):
         super().__init__()
         self._menu_items = []
@@ -51,7 +49,7 @@ class ShortcutsPlugin(BasePlugin):
         if self._qa_mid:
             try:
                 self.remove_menu_item(self._qa_mid)
-            except:
+            except Exception:
                 pass
         if self._deeplink_unhook:
             try:
@@ -61,7 +59,7 @@ class ShortcutsPlugin(BasePlugin):
                             u.unhook()
                 elif hasattr(self._deeplink_unhook, "unhook"):
                     self._deeplink_unhook.unhook()
-            except:
+            except Exception:
                 pass
             self._deeplink_unhook = None
 
@@ -99,6 +97,7 @@ class ShortcutsPlugin(BasePlugin):
                         frag.presentFragment(PluginSettingsActivity(plugin))
             except Exception as e:
                 log(f"[{__id__}] _open_self_settings: {e}")
+
         run_on_ui_thread(_do)
 
     def _show_spinner(self):
@@ -117,6 +116,7 @@ class ShortcutsPlugin(BasePlugin):
                 self._spinner.show()
             except Exception as e:
                 log(f"[{__id__}] show spinner: {e}")
+
         run_on_ui_thread(_do)
 
     def _dismiss_spinner(self):
@@ -127,6 +127,7 @@ class ShortcutsPlugin(BasePlugin):
             except Exception as e:
                 log(f"[{__id__}] dismiss spinner: {e}")
             self._spinner = None
+
         run_on_ui_thread(_do, 250)
 
     def _with_spinner(self, fn):
@@ -158,14 +159,13 @@ class ShortcutsPlugin(BasePlugin):
             self._open_settings_or_subfragment(pid, sub_fragment=sub)
 
         elif t == "operate_setting":
-            sk = sc.get("setting_key", "")
             st = sc.get("setting_type", "switch")
             vk = _setting_value_key(sc)
 
             if st == "switch":
                 try:
                     cur = _ctrl().getPluginSettingBoolean(pid, vk, False)
-                except:
+                except Exception:
                     cur = False
                 value = not bool(cur)
                 _ctrl().setPluginSetting(pid, vk, value)
@@ -193,8 +193,11 @@ class ShortcutsPlugin(BasePlugin):
                 run_on_ui_thread(lambda: BulletinHelper.show_info(msg))
             except Exception as e:
                 log(f"[{__id__}] toggle {pid}: {e}")
-                run_on_ui_thread(lambda: BulletinHelper.show_info(str(e)))
+                err_msg = str(e)
+                run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
+
         import threading
+
         threading.Thread(target=_do, daemon=True).start()
 
     def _open_settings_or_subfragment(self, pid, sub_fragment=None):
@@ -226,7 +229,7 @@ class ShortcutsPlugin(BasePlugin):
                         try:
                             eng.openPluginSetting(pid, sub_fragment, frag)
                             return
-                        except:
+                        except Exception:
                             pass
                     frag.presentFragment(PluginSettingsActivity(plugin, sub_fragment))
                 else:
@@ -234,18 +237,19 @@ class ShortcutsPlugin(BasePlugin):
                         try:
                             eng.openPluginSettings(pid, frag)
                             return
-                        except:
+                        except Exception:
                             pass
                     frag.presentFragment(PluginSettingsActivity(plugin))
             except Exception as e:
                 log(f"[{__id__}] open_settings_or_subfragment {pid}: {e}")
+
         run_on_ui_thread(_do)
 
     # ========== SHORTCUTS MANAGEMENT ==========
     def _load_shortcuts(self):
         try:
             raw = json.loads(self.get_setting("shortcuts_json", "[]"))
-        except:
+        except Exception:
             return []
         if isinstance(raw, dict):
             items = raw.get("items")
@@ -287,7 +291,7 @@ class ShortcutsPlugin(BasePlugin):
         for mid in self._menu_items:
             try:
                 self.remove_menu_item(mid)
-            except:
+            except Exception:
                 pass
         self._menu_items = []
 
@@ -295,17 +299,13 @@ class ShortcutsPlugin(BasePlugin):
         label = sc.get("label") or _sc_label(sc)
         icon = sc.get("icon") or "media_settings"
         loc = sc.get("location", "drawer")
-        menu_types = [MenuItemType.DRAWER_MENU, MenuItemType.CHAT_ACTION_MENU] if loc == "both" else [
-            MenuItemType.DRAWER_MENU if loc == "drawer" else MenuItemType.CHAT_ACTION_MENU
-        ]
+        menu_types = (
+            [MenuItemType.DRAWER_MENU, MenuItemType.CHAT_ACTION_MENU]
+            if loc == "both"
+            else [MenuItemType.DRAWER_MENU if loc == "drawer" else MenuItemType.CHAT_ACTION_MENU]
+        )
         for mt in menu_types:
-            mid = self.add_menu_item(MenuItemData(
-                menu_type=mt,
-                text=label,
-                icon=icon,
-                priority=10,
-                on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc)
-            ))
+            mid = self.add_menu_item(MenuItemData(menu_type=mt, text=label, icon=icon, priority=10, on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc)))
             if mid:
                 self._menu_items.append(mid)
 

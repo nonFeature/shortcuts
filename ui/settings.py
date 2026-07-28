@@ -1,9 +1,19 @@
 import traceback
+
 from android_utils import run_on_ui_thread
 from client_utils import log
-from ui.settings import Switch, Header, Divider, Text, Selector, Input
-from ui.bulletin import BulletinHelper
 from java import dynamic_proxy, jclass
+from ui.bulletin import BulletinHelper
+
+from features.deeplink import copy_deeplink
+from features.quick_access import update_quick_access
+from header import __id__
+from i18n.locales import _s
+from ui.settings import Divider, Header, Switch, Text
+from ui.wizard import build_wizard_step1
+from utils.helpers import _ctrl, _dialog_context, _loc_label, _plugin_name, _sc_label, _show_dialog_safe
+from utils.scanner import _trigger_setting_on_change
+
 
 def build_settings_list(plugin):
     settings = []
@@ -13,45 +23,29 @@ def build_settings_list(plugin):
     for i, sc in enumerate(shortcuts):
         label = _sc_label(sc)
         loc_label = _loc_label(sc.get("location", "drawer"))
-        settings.append(Text(
-            text=f"{label} [{loc_label}]",
-            on_click=lambda v, _sc=sc: plugin._exec_shortcut(_sc)
-        ))
-        settings.append(Text(
-            text=_s("copy_deeplink"),
-            accent=True,
-            on_click=lambda v, _sc=sc: copy_deeplink(plugin, _sc)
-        ))
-        settings.append(Text(
-            text=_s("remove_shortcut"),
-            red=True,
-            on_click=lambda v, _i=i: plugin._remove_shortcut(_i)
-        ))
+        settings.append(Text(text=f"{label} [{loc_label}]", on_click=lambda v, _sc=sc: plugin._exec_shortcut(_sc)))
+        settings.append(Text(text=_s("copy_deeplink"), accent=True, on_click=lambda v, _sc=sc: copy_deeplink(plugin, _sc)))
+        settings.append(Text(text=_s("remove_shortcut"), red=True, on_click=lambda v, _i=i: plugin._remove_shortcut(_i)))
         settings.append(Divider())
 
-    settings.append(Text(
-        text=_s("add_shortcut"),
-        accent=True,
-        create_sub_fragment=lambda: build_wizard_step1(plugin)
-    ))
+    settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=lambda: build_wizard_step1(plugin)))
 
     settings.append(Header(text=_s("actions")))
-    settings.append(Switch(
-        key="quick_access",
-        text=_s("quick_access"),
-        subtext=_s("quick_access_sub"),
-        default=False,
-        on_change=lambda v: update_quick_access(plugin, v)
-    ))
-    settings.append(Switch(
-        key="auto_remove_missing",
-        text=_s("auto_remove_missing"),
-        subtext=_s("auto_remove_missing_sub"),
-        default=False,
-        on_change=lambda v: plugin._on_auto_remove_missing_toggle(v)
-    ))
+    settings.append(
+        Switch(key="quick_access", text=_s("quick_access"), subtext=_s("quick_access_sub"), default=False, on_change=lambda v: update_quick_access(plugin, v))
+    )
+    settings.append(
+        Switch(
+            key="auto_remove_missing",
+            text=_s("auto_remove_missing"),
+            subtext=_s("auto_remove_missing_sub"),
+            default=False,
+            on_change=lambda v: plugin._on_auto_remove_missing_toggle(v),
+        )
+    )
     settings.append(Divider())
     return settings
+
 
 def show_selector_dialog(plugin, pid, key, title, items, sc=None):
     def _do():
@@ -65,7 +59,7 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
                 return
             try:
                 cur = _ctrl().getPluginSettingInt(pid, key, 0)
-            except:
+            except Exception:
                 cur = 0
 
             AlertDialog = jclass("org.telegram.ui.ActionBar.AlertDialog")
@@ -92,22 +86,23 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
                             run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_plugin_name(pid)}: {opts[idx]}"))
                         except Exception as e:
                             log(f"[{__id__}] selector dialog save: {e}")
+
                 return CellClick()
 
             for i, opt in enumerate(opts):
                 cell = RadioColorCell(context)
                 try:
                     cell.setPadding(AndroidUtilities.dp(4.0), 0, AndroidUtilities.dp(4.0), 0)
-                except:
+                except Exception:
                     pass
                 try:
                     cell.setCheckColor(Theme.getColor(Theme.key_radioBackground), Theme.getColor(Theme.key_dialogRadioBackgroundChecked))
-                except:
+                except Exception:
                     pass
                 cell.setTextAndValue(opt, int(cur) == i)
                 try:
                     cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 2))
-                except:
+                except Exception:
                     pass
                 cell.setOnClickListener(make_click(i))
                 layout.addView(cell)
@@ -120,8 +115,11 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
             _show_dialog_safe(frag, dialog_ref[0])
         except Exception as e:
             log(f"[{__id__}] show selector dialog: {e}\n{traceback.format_exc()}")
-            run_on_ui_thread(lambda: BulletinHelper.show_info(str(e)))
+            err_msg = str(e)
+            run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
+
     run_on_ui_thread(_do)
+
 
 def show_input_dialog(plugin, pid, key, title, sc=None):
     def _do():
@@ -131,7 +129,7 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
                 return
             try:
                 cur = _ctrl().getPluginSettingString(pid, key, "")
-            except:
+            except Exception:
                 cur = ""
 
             AlertDialog = jclass("org.telegram.ui.ActionBar.AlertDialog")
@@ -157,7 +155,7 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
                 active = Theme.key_windowBackgroundWhiteInputFieldActivated
                 edit.setCursorColor(Theme.getColor(active))
                 edit.setLineColors(Theme.getColor(Theme.key_windowBackgroundWhiteInputField), Theme.getColor(active), Theme.getColor(Theme.key_text_RedRegular))
-            except:
+            except Exception:
                 pass
             edit.setHintText(_s("text_value"))
             edit.setFocusable(True)
@@ -166,7 +164,7 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
             try:
                 edit.setPadding(0, AndroidUtilities.dp(6.0), 0, AndroidUtilities.dp(6.0))
                 layout.addView(edit, LayoutHelper.createLinear(-1, -2, 24.0, 0.0, 24.0, 10.0))
-            except:
+            except Exception:
                 layout.addView(edit)
 
             class SaveClick(OnButtonClick):
@@ -184,12 +182,12 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
             builder.setTitle(title or _s("text_value"))
             try:
                 builder.makeCustomMaxHeight()
-            except:
+            except Exception:
                 pass
             builder.setView(layout)
             try:
                 builder.setWidth(AndroidUtilities.dp(292.0))
-            except:
+            except Exception:
                 pass
             builder.setPositiveButton(_s("save"), SaveClick())
             builder.setNegativeButton(_s("cancel"), None)
@@ -200,24 +198,26 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
                         edit.requestFocus()
                         edit.setSelection(edit.length())
                         AndroidUtilities.showKeyboard(edit)
-                    except:
+                    except Exception:
                         pass
 
             class HideKeyboard(OnDismiss):
                 def onDismiss(self, dialog):
                     try:
                         AndroidUtilities.hideKeyboard(edit)
-                    except:
+                    except Exception:
                         pass
 
             dialog = builder.create()
             try:
                 dialog.setOnShowListener(ShowKeyboard())
                 dialog.setOnDismissListener(HideKeyboard())
-            except:
+            except Exception:
                 pass
             _show_dialog_safe(frag, dialog)
         except Exception as e:
             log(f"[{__id__}] show input dialog: {e}\n{traceback.format_exc()}")
-            run_on_ui_thread(lambda: BulletinHelper.show_info(str(e)))
+            err_msg = str(e)
+            run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
+
     run_on_ui_thread(_do)

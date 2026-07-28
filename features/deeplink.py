@@ -1,9 +1,15 @@
 import urllib.parse
+
 from android_utils import run_on_ui_thread
 from client_utils import log
-from ui.bulletin import BulletinHelper
-from org.telegram.messenger import AndroidUtilities
 from java import dynamic_proxy, jclass
+from org.telegram.messenger import AndroidUtilities
+from ui.bulletin import BulletinHelper
+
+from header import __id__
+from i18n.locales import _s
+from utils.helpers import _dialog_context, _loc_label, _plugin_name, _sc_label, _show_dialog_safe
+
 
 def register_deeplink_hook(plugin):
     try:
@@ -12,6 +18,7 @@ def register_deeplink_hook(plugin):
     except Exception as e:
         log(f"[{__id__}] _register_deeplink_hook error: {e}")
         return None
+
 
 def _on_open_url_before(plugin, param):
     try:
@@ -24,6 +31,7 @@ def _on_open_url_before(plugin, param):
             _handle_deeplink(plugin, url_str)
     except Exception as e:
         log(f"[{__id__}] _on_open_url_before: {e}")
+
 
 def _handle_deeplink(plugin, url_str):
     def _do():
@@ -38,15 +46,7 @@ def _handle_deeplink(plugin, url_str):
             icon = str(uri.getQueryParameter("icon") or "media_settings")
             loc = str(uri.getQueryParameter("location") or "drawer")
 
-            sc = {
-                "type": stype,
-                "plugin_id": pid,
-                "location": loc,
-                "label": label,
-                "icon": icon,
-                "setting_key": setting_key,
-                "sub_fragment": sub_fragment
-            }
+            sc = {"type": stype, "plugin_id": pid, "location": loc, "label": label, "icon": icon, "setting_key": setting_key, "sub_fragment": sub_fragment}
 
             frag, context = _dialog_context()
             if not context:
@@ -56,7 +56,9 @@ def _handle_deeplink(plugin, url_str):
             builder = AlertDialog.Builder(context)
             builder.setTitle(_s("add_shortcut"))
             dis_label = label or _sc_label(sc)
-            builder.setMessage(f"{_s('add_deeplink_confirm')}\n\n{_s('custom_label')}: {dis_label}\n{_s('plugins')}: {_plugin_name(pid)}\n{_s('location')}: {_loc_label(loc)}")
+            builder.setMessage(
+                f"{_s('add_deeplink_confirm')}\n\n{_s('custom_label')}: {dis_label}\n{_s('plugins')}: {_plugin_name(pid)}\n{_s('location')}: {_loc_label(loc)}"
+            )
 
             class AddClick(dynamic_proxy(jclass("org.telegram.ui.ActionBar.AlertDialog$OnButtonClickListener"))):
                 def onClick(self, dialog, which):
@@ -72,7 +74,9 @@ def _handle_deeplink(plugin, url_str):
             _show_dialog_safe(frag, dialog)
         except Exception as e:
             log(f"[{__id__}] handle_deeplink error: {e}")
+
     run_on_ui_thread(_do)
+
 
 def _generate_deeplink(plugin, sc):
     try:
@@ -89,10 +93,8 @@ def _generate_deeplink(plugin, sc):
         log(f"[{__id__}] _generate_deeplink: {e}")
         return ""
 
+
 def copy_deeplink(plugin, sc):
     link = _generate_deeplink(plugin, sc)
     if link:
-        run_on_ui_thread(lambda: (
-            AndroidUtilities.addToClipboard(link),
-            BulletinHelper.show_info(_s("deeplink_copied"))
-        ))
+        run_on_ui_thread(lambda: (AndroidUtilities.addToClipboard(link), BulletinHelper.show_info(_s("deeplink_copied"))))
