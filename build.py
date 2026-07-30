@@ -36,6 +36,8 @@ HEADER_WATERMARK = """
 #       @@@@
 # @@@@@@@@@@@@@@@@@@@
 # @@@@@@@@@@@@@@@@@@@
+
+# https://github.com/nonFeature/shortcuts
 """
 
 FOOTER_WATERMARK = """
