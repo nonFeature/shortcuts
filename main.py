@@ -1,13 +1,10 @@
 import json
-import time
 import traceback
 
 from android_utils import run_on_ui_thread
 from base_plugin import BasePlugin, MenuItemData, MenuItemType
 from client_utils import get_last_fragment, log
 from com.exteragram.messenger.plugins.ui import PluginsActivity, PluginSettingsActivity
-from org.telegram.messenger import ApplicationLoader
-from ui.alert import AlertDialogBuilder
 from ui.bulletin import BulletinHelper
 
 from features.deeplink import register_deeplink_hook
@@ -32,7 +29,6 @@ class ShortcutsPlugin(BasePlugin):
         super().__init__()
         self._menu_items = []
         self._qa_mid = None
-        self._spinner = None
         self._deeplink_unhook = None
 
     def on_plugin_load(self):
@@ -97,44 +93,6 @@ class ShortcutsPlugin(BasePlugin):
                 log(f"[{__id__}] _open_self_settings: {e}")
 
         run_on_ui_thread(_do)
-
-    def _show_spinner(self):
-        def _do():
-            try:
-                fragment = get_last_fragment()
-                ctx = fragment.getParentActivity() if fragment else ApplicationLoader.applicationContext
-                if ctx is None:
-                    return
-                if self._spinner and self._spinner.get_dialog() and self._spinner.get_dialog().isShowing():
-                    return
-                self._spinner = AlertDialogBuilder(ctx, AlertDialogBuilder.ALERT_TYPE_SPINNER)
-                self._spinner.set_cancelable(False)
-                self._spinner.set_canceled_on_touch_outside(False)
-                self._spinner.create()
-                self._spinner.show()
-            except Exception as e:
-                log(f"[{__id__}] show spinner: {e}")
-
-        run_on_ui_thread(_do)
-
-    def _dismiss_spinner(self):
-        def _do():
-            try:
-                if self._spinner and self._spinner.get_dialog() and self._spinner.get_dialog().isShowing():
-                    self._spinner.dismiss()
-            except Exception as e:
-                log(f"[{__id__}] dismiss spinner: {e}")
-            self._spinner = None
-
-        run_on_ui_thread(_do, 250)
-
-    def _with_spinner(self, fn):
-        try:
-            self._show_spinner()
-            time.sleep(0.08)
-            return fn()
-        finally:
-            self._dismiss_spinner()
 
     # ========== EXECUTION ==========
     def _exec_shortcut(self, sc):

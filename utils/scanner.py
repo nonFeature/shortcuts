@@ -66,16 +66,13 @@ def _get_settings_list(pid, ensure_loaded=False, wait_seconds=0.6):
 
 
 def _has_settings_reliably(pid):
-    if _has_settings(pid):
-        return True
-    lst = _get_settings_list(pid, ensure_loaded=True, wait_seconds=0.45)
-    return lst is not None
+    return _has_settings(pid)
 
 
-def _collect_sub_fragments(pid):
+def _collect_sub_fragments(pid, ensure_loaded=True):
     out = []
     try:
-        lst = _get_settings_list(pid, ensure_loaded=True)
+        lst = _get_settings_list(pid, ensure_loaded=ensure_loaded)
     except Exception:
         lst = None
     if not lst:
@@ -137,10 +134,10 @@ def _collect_sub_fragments(pid):
     return out
 
 
-def _collect_settings(pid, prefix=None):
+def _collect_settings(pid, prefix=None, ensure_loaded=True):
     out = []
     try:
-        lst = _get_settings_list(pid, ensure_loaded=True)
+        lst = _get_settings_list(pid, ensure_loaded=ensure_loaded)
     except Exception:
         lst = None
     if not lst:

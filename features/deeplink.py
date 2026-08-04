@@ -1,6 +1,7 @@
 import urllib.parse
 
 from android_utils import run_on_ui_thread
+from base_plugin import MethodHook
 from client_utils import log
 from java import dynamic_proxy, jclass
 from org.telegram.messenger import AndroidUtilities
@@ -14,10 +15,18 @@ from utils.helpers import _dialog_context, _loc_label, _plugin_name, _sc_label, 
 def register_deeplink_hook(plugin):
     try:
         BrowserClass = jclass("org.telegram.messenger.browser.Browser")
-        return plugin.hook_all_methods(BrowserClass, "openUrl", before=lambda param: _on_open_url_before(plugin, param))
+        return plugin.hook_all_methods(BrowserClass, "openUrl", _OpenUrlHook(plugin))
     except Exception as e:
         log(f"[{__id__}] _register_deeplink_hook error: {e}")
         return None
+
+
+class _OpenUrlHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def before_hooked_method(self, param):
+        _on_open_url_before(self.plugin, param)
 
 
 def _on_open_url_before(plugin, param):

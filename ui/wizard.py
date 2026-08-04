@@ -38,7 +38,7 @@ def build_wizard_step1(plugin):
                 text=_s("plugins"),
                 items=[_plugin_name(pid) for pid in pids],
                 default=plug_i,
-                on_change=lambda value: _ctrl().setPluginSetting(__id__, "__wiz_plugin", int(value)),
+                on_change=lambda value: _on_plugin_change(value, pids),
             )
         )
         items.append(Divider())
@@ -74,7 +74,7 @@ def build_wizard_step1(plugin):
 
         if type_i == 1:
             sub_keys = ["root"]
-            subs = _collect_sub_fragments(selected_pid)
+            subs = _collect_sub_fragments(selected_pid, ensure_loaded=False)
             if subs:
                 sub_titles = [_s("root_settings")]
                 for sub in subs:
@@ -84,7 +84,7 @@ def build_wizard_step1(plugin):
             items.append(Divider())
             items.extend(build_wizard_step_customize(plugin, pids, "open_settings", sub_keys=sub_keys))
         elif type_i == 2:
-            settings = _collect_settings(selected_pid)
+            settings = _collect_settings(selected_pid, ensure_loaded=False)
             if not settings:
                 return [Divider(text=_s("no_settings"))]
             names = [s.get("text", s.get("key", "")) for s in settings]
@@ -97,7 +97,22 @@ def build_wizard_step1(plugin):
 
         return items
 
-    return plugin._with_spinner(_build)
+    try:
+        return _build()
+    except Exception as e:
+        log(f"[{__id__}] build_wizard_step1 error: {e}\n{traceback.format_exc()}")
+        return [Header(text=_s("add_shortcut")), Divider(text=f"{_s('error')}: {e}")]
+
+
+def _on_plugin_change(value, pids):
+    try:
+        index = int(value)
+        if 0 <= index < len(pids):
+            pid = pids[index]
+            _ctrl().setPluginSetting(__id__, "__wiz_plugin", index)
+            _ctrl().loadPluginSettings(pid)
+    except Exception as e:
+        log(f"[{__id__}] plugin selection error: {e}")
 
 
 def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=None):
@@ -114,11 +129,9 @@ def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=Non
     items.append(Input(key="__wiz_label", text=_s("custom_label"), default=def_label))
 
     icon_key = _selected_icon_key()
-    icon_title = _icon_title(icon_key)
     items.append(
         Text(
             text=_s("custom_icon"),
-            subtext=icon_title,
             icon=icon_key,
             create_sub_fragment=lambda: build_icon_picker(plugin),
         )
@@ -229,10 +242,10 @@ def _selected_icon_key():
 
 
 def _icon_title(icon_key):
-    for key, title in PRESET_ICONS:
+    for key, title_key in PRESET_ICONS:
         if key == icon_key:
-            return title
-    return icon_key or PRESET_ICONS[0][1]
+            return _s(title_key)
+    return icon_key or _s(PRESET_ICONS[0][1])
 
 
 def _save_selected_icon(plugin, icon_key):
@@ -249,26 +262,19 @@ def _save_selected_icon(plugin, icon_key):
         log(f"[{__id__}] select icon error: {e}")
 
 
-def _save_custom_icon(plugin):
-    icon_key = _get_setting_string("__wiz_custom_icon")
-    if not _icon_exists(icon_key):
-        run_on_ui_thread(lambda: BulletinHelper.show_info(_s("icon_not_found")))
-        return
+def _remember_custom_icon(value):
     try:
-        ctrl = _ctrl()
-        ctrl.setPluginSetting(__id__, "__wiz_icon", icon_key)
-        ctrl.loadPluginSettings(__id__)
-        run_on_ui_thread(lambda: BulletinHelper.show_info(_s("icon_found")))
+        _ctrl().setPluginSetting(__id__, "__wiz_custom_icon", str(value or "").strip())
     except Exception as e:
-        log(f"[{__id__}] custom icon save error: {e}")
+        log(f"[{__id__}] custom icon input error: {e}")
 
 
 def build_icon_picker(plugin):
     items = [Header(text=_s("choose_icon"))]
-    for icon_key, icon_title in PRESET_ICONS:
+    for icon_key, title_key in PRESET_ICONS:
         items.append(
             Text(
-                text=icon_title,
+                text=_s(title_key),
                 icon=icon_key,
                 on_click=lambda _value, key=icon_key: _save_selected_icon(plugin, key),
             )
@@ -281,10 +287,10 @@ def build_icon_picker(plugin):
             text=_s("custom_icon_name"),
             subtext=_s("custom_icon_name_sub"),
             default=custom_key,
+            on_change=_remember_custom_icon,
         )
     )
     if custom_key:
         status_key = "icon_found" if _icon_exists(custom_key) else "icon_not_found"
         items.append(Text(text=_s(status_key), red=status_key == "icon_not_found"))
-    items.append(Text(text=_s("check_icon"), accent=True, on_click=lambda _value: _save_custom_icon(plugin)))
     return items
