@@ -75,7 +75,7 @@ def _handle_deeplink(plugin, url_str):
                     sc_list.append(sc)
                     plugin._save_shortcuts(sc_list)
                     plugin._restore_shortcuts()
-                    run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_s('shortcut_created')}: {dis_label}"))
+                    run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s('shortcut_created')}: {dis_label}"))
 
             builder.setPositiveButton(_s("create"), AddClick())
             builder.setNegativeButton(_s("cancel"), None)
@@ -106,4 +106,16 @@ def _generate_deeplink(plugin, sc):
 def copy_deeplink(plugin, sc):
     link = _generate_deeplink(plugin, sc)
     if link:
-        run_on_ui_thread(lambda: (AndroidUtilities.addToClipboard(link), BulletinHelper.show_info(_s("deeplink_copied"))))
+
+        def _notify():
+            AndroidUtilities.addToClipboard(link)
+            try:
+                BulletinHelper.show_copied_to_clipboard(_s("deeplink_copied"))
+            except Exception as e:
+                log(f"[{__id__}] copied bulletin fallback: {e}")
+                try:
+                    BulletinHelper.show_success(_s("deeplink_copied"))
+                except Exception:
+                    BulletinHelper.show_success(_s("deeplink_copied"))
+
+        run_on_ui_thread(_notify)

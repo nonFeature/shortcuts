@@ -20,7 +20,7 @@ LAST_FILES = ["main.py"]
 INTERNAL_MODULES = ("data", "i18n", "utils", "features", "ui", "header")
 LOCAL_UI_SETTINGS_NAMES = {"build_settings_list", "show_input_dialog", "show_selector_dialog"}
 SDK_UI_SETTINGS_NAMES = {"Divider", "Header", "Input", "Selector", "Switch", "Text"}
-SDK_UI_MODULES = {"ui.settings"}
+SDK_UI_MODULES = {"ui.settings", "ui.bulletin"}
 
 COPYRIGHT_STRING = "# Shortcuts plugin for exteraGram / Ayugram\n# Plugin by @feature_plugins\n"
 

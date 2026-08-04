@@ -78,7 +78,7 @@ class ShortcutsPlugin(BasePlugin):
         if restore_menus:
             self._restore_shortcuts()
         if notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_s('missing_shortcuts_removed')}: {removed}"))
+            run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s('missing_shortcuts_removed')}: {removed}"))
         return removed
 
     def _open_self_settings(self):
@@ -102,7 +102,7 @@ class ShortcutsPlugin(BasePlugin):
         if not _plugin_exists(pid):
             if bool(self.get_setting("auto_remove_missing", False)):
                 self._cleanup_missing_shortcuts(restore_menus=True, notify=False)
-            run_on_ui_thread(lambda: BulletinHelper.show_info(f"{pid}: {_s('plugin_not_found')}"))
+            run_on_ui_thread(lambda: BulletinHelper.show_error(f"{pid}: {_s('plugin_not_found')}"))
             return
 
         if t == "toggle_plugin":
@@ -126,7 +126,7 @@ class ShortcutsPlugin(BasePlugin):
                 value = not bool(cur)
                 _ctrl().setPluginSetting(pid, vk, value)
                 _trigger_setting_on_change(pid, sc, value)
-                run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_plugin_name(pid)}: {('ON' if value else 'OFF')}"))
+                run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_plugin_name(pid)}: {('ON' if value else 'OFF')}"))
             elif st == "selector":
                 opts = sc.get("setting_items") or sc.get("items") or []
                 if not opts:
@@ -146,11 +146,11 @@ class ShortcutsPlugin(BasePlugin):
             try:
                 _ctrl().setPluginEnabled(pid, enabled, None)
                 msg = f"{pname}: ON" if enabled else f"{pname}: OFF"
-                run_on_ui_thread(lambda: BulletinHelper.show_info(msg))
+                run_on_ui_thread(lambda: BulletinHelper.show_success(msg))
             except Exception as e:
                 log(f"[{__id__}] toggle {pid}: {e}")
                 err_msg = str(e)
-                run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
+                run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
 
         import threading
 
@@ -268,5 +268,5 @@ class ShortcutsPlugin(BasePlugin):
             sc_list.pop(idx)
             self._save_shortcuts(sc_list)
             self._restore_shortcuts()
-            run_on_ui_thread(lambda: BulletinHelper.show_info(_s("shortcut_removed")))
+            run_on_ui_thread(lambda: BulletinHelper.show_success(_s("shortcut_removed")))
             _ctrl().loadPluginSettings(__id__)

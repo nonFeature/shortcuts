@@ -10,7 +10,7 @@ from features.quick_access import update_quick_access
 from header import __id__
 from i18n.locales import _s
 from ui.settings import Divider, Header, Switch, Text
-from ui.wizard import build_wizard_step1
+from ui.wizard import build_new_wizard, build_wizard_step1
 from utils.helpers import _ctrl, _dialog_context, _loc_label, _plugin_name, _sc_label, _show_dialog_safe
 from utils.scanner import _trigger_setting_on_change
 
@@ -23,12 +23,16 @@ def build_settings_list(plugin):
     for i, sc in enumerate(shortcuts):
         label = _sc_label(sc)
         loc_label = _loc_label(sc.get("location", "drawer"))
-        settings.append(Text(text=f"{label} [{loc_label}]", on_click=lambda v, _sc=sc: plugin._exec_shortcut(_sc)))
-        settings.append(Text(text=_s("copy_deeplink"), accent=True, on_click=lambda v, _sc=sc: copy_deeplink(plugin, _sc)))
-        settings.append(Text(text=_s("remove_shortcut"), red=True, on_click=lambda v, _i=i: plugin._remove_shortcut(_i)))
+        settings.append(
+            Text(
+                text=f"{label} [{loc_label}]",
+                icon=sc.get("icon") or "media_settings",
+                create_sub_fragment=lambda _i=i, _sc=sc: build_shortcut_actions(plugin, _i, _sc),
+            )
+        )
         settings.append(Divider())
 
-    settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=lambda: build_wizard_step1(plugin)))
+    settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=lambda: build_new_wizard(plugin)))
 
     settings.append(Header(text=_s("actions")))
     settings.append(
@@ -45,6 +49,19 @@ def build_settings_list(plugin):
     )
     settings.append(Divider())
     return settings
+
+
+def build_shortcut_actions(plugin, index, sc):
+    return [
+        Text(text=_s("open_shortcut"), icon="msg_share", on_click=lambda _value: plugin._exec_shortcut(sc)),
+        Text(
+            text=_s("edit_shortcut"),
+            icon="msg_edit",
+            create_sub_fragment=lambda: build_wizard_step1(plugin, edit_index=index),
+        ),
+        Text(text=_s("copy_deeplink"), icon="msg_copy", on_click=lambda _value: copy_deeplink(plugin, sc)),
+        Text(text=_s("remove_shortcut"), icon="msg_delete", red=True, on_click=lambda _value: plugin._remove_shortcut(index)),
+    ]
 
 
 def show_selector_dialog(plugin, pid, key, title, items, sc=None):
@@ -83,7 +100,7 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
                             _ctrl().setPluginSetting(pid, key, value)
                             if sc:
                                 _trigger_setting_on_change(pid, sc, value)
-                            run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_plugin_name(pid)}: {opts[idx]}"))
+                            run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_plugin_name(pid)}: {opts[idx]}"))
                         except Exception as e:
                             log(f"[{__id__}] selector dialog save: {e}")
 
@@ -116,7 +133,7 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
         except Exception as e:
             log(f"[{__id__}] show selector dialog: {e}\n{traceback.format_exc()}")
             err_msg = str(e)
-            run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
+            run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
 
     run_on_ui_thread(_do)
 
@@ -174,7 +191,7 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
                         _ctrl().setPluginSetting(pid, key, value)
                         if sc:
                             _trigger_setting_on_change(pid, sc, value)
-                        run_on_ui_thread(lambda: BulletinHelper.show_info(f"{_plugin_name(pid)}: {value}"))
+                        run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_plugin_name(pid)}: {value}"))
                     except Exception as e:
                         log(f"[{__id__}] input dialog save: {e}")
 
@@ -218,6 +235,6 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
         except Exception as e:
             log(f"[{__id__}] show input dialog: {e}\n{traceback.format_exc()}")
             err_msg = str(e)
-            run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
+            run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
 
     run_on_ui_thread(_do)
