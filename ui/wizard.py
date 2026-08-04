@@ -1,4 +1,5 @@
 import threading
+import time
 import traceback
 
 from android_utils import run_on_ui_thread
@@ -42,7 +43,7 @@ def build_wizard_step1(plugin, edit_index=None):
             if 0 <= edit_index < len(shortcuts):
                 editing_sc = shortcuts[edit_index]
                 if _EDIT_SESSION != edit_index:
-                    _prime_edit_state(editing_sc, pids)
+                    _prime_edit_state(plugin, editing_sc, pids)
                     _EDIT_SESSION = edit_index
 
         try:
@@ -53,7 +54,7 @@ def build_wizard_step1(plugin, edit_index=None):
             plug_i = 0
         selected_pid = pids[plug_i]
         if edit_index is None and not _CREATE_SESSION:
-            _ctrl().setPluginSetting(__id__, "__wiz_label", _plugin_name(selected_pid))
+            plugin.set_setting("__wiz_label", _plugin_name(selected_pid))
             _CREATE_SESSION = True
 
         items.append(
@@ -73,7 +74,7 @@ def build_wizard_step1(plugin, edit_index=None):
             except Exception:
                 current_type = 0
             if current_type != 0:
-                _ctrl().setPluginSetting(__id__, "__wiz_type", 0)
+                plugin.set_setting("__wiz_type", 0)
             items.append(Divider(text=_s("toggle_only_warning")))
             items.append(Divider())
             items.extend(build_wizard_step_customize(plugin, pids, "toggle_plugin", edit_index=edit_index))
@@ -92,7 +93,6 @@ def build_wizard_step1(plugin, edit_index=None):
                 text=_s("type"),
                 items=[_s("toggle_plugin"), _s("open_settings"), _s("operate_setting")],
                 default=type_i,
-                on_change=lambda value: _ctrl().setPluginSetting(__id__, "__wiz_type", int(value)),
             )
         )
 
@@ -135,7 +135,6 @@ def _on_plugin_change(value, pids):
         index = int(value)
         if 0 <= index < len(pids):
             pid = pids[index]
-            _ctrl().setPluginSetting(__id__, "__wiz_plugin", index)
             _ctrl().loadPluginSettings(pid)
     except Exception as e:
         log(f"[{__id__}] plugin selection error: {e}")
@@ -237,8 +236,8 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
             label = _sc_label(sc)
             message_key = "shortcut_updated" if edit_index is not None else "shortcut_created"
             run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s(message_key)}: {label}"))
-            ctrl.loadPluginSettings(__id__)
             run_on_ui_thread(lambda: _finish_wizard_fragment(wizard_fragment))
+            threading.Thread(target=lambda: _reload_settings_after_wizard(ctrl), daemon=True).start()
         except Exception as e:
             log(f"[{__id__}] wizard_finalize error: {e}\n{traceback.format_exc()}")
             err_msg = str(e)
@@ -263,8 +262,7 @@ def _get_setting_string(key, default=""):
         return default
 
 
-def _prime_edit_state(sc, pids):
-    ctrl = _ctrl()
+def _prime_edit_state(plugin, sc, pids):
     pid = sc.get("plugin_id", "")
     try:
         plugin_index = pids.index(pid)
@@ -273,12 +271,20 @@ def _prime_edit_state(sc, pids):
     location = sc.get("location", "drawer")
     location_index = 2 if location == "both" else 1 if location == "chat" else 0
     type_index = {"toggle_plugin": 0, "open_settings": 1, "operate_setting": 2}.get(sc.get("type"), 0)
-    ctrl.setPluginSetting(__id__, "__wiz_loc", location_index)
-    ctrl.setPluginSetting(__id__, "__wiz_plugin", plugin_index)
-    ctrl.setPluginSetting(__id__, "__wiz_type", type_index)
-    ctrl.setPluginSetting(__id__, "__wiz_label", str(sc.get("label", "") or ""))
-    ctrl.setPluginSetting(__id__, "__wiz_icon", str(sc.get("icon", "media_settings") or "media_settings"))
-    ctrl.setPluginSetting(__id__, "__wiz_custom_icon", "")
+    plugin.set_setting("__wiz_loc", location_index)
+    plugin.set_setting("__wiz_plugin", plugin_index)
+    plugin.set_setting("__wiz_type", type_index)
+    plugin.set_setting("__wiz_label", str(sc.get("label", "") or ""))
+    plugin.set_setting("__wiz_icon", str(sc.get("icon", "media_settings") or "media_settings"))
+    plugin.set_setting("__wiz_custom_icon", "")
+
+
+def _reload_settings_after_wizard(ctrl):
+    try:
+        time.sleep(0.1)
+        ctrl.loadPluginSettings(__id__)
+    except Exception as e:
+        log(f"[{__id__}] reload after wizard: {e}")
 
 
 def _edit_subfragment_index(sc, sub_keys):
@@ -350,8 +356,8 @@ def _save_selected_icon(plugin, icon_key):
         return
     try:
         ctrl = _ctrl()
-        ctrl.setPluginSetting(__id__, "__wiz_icon", icon_key)
-        ctrl.setPluginSetting(__id__, "__wiz_custom_icon", "")
+        plugin.set_setting("__wiz_icon", icon_key)
+        plugin.set_setting("__wiz_custom_icon", "")
         ctrl.loadPluginSettings(__id__)
         run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s('icon_selected')}: {_icon_title(icon_key)}"))
     except Exception as e:
@@ -359,10 +365,7 @@ def _save_selected_icon(plugin, icon_key):
 
 
 def _remember_custom_icon(value):
-    try:
-        _ctrl().setPluginSetting(__id__, "__wiz_custom_icon", str(value or "").strip())
-    except Exception as e:
-        log(f"[{__id__}] custom icon input error: {e}")
+    return None
 
 
 def build_icon_picker(plugin):

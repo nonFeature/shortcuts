@@ -1,4 +1,5 @@
 import json
+import threading
 import traceback
 
 from android_utils import run_on_ui_thread
@@ -37,9 +38,15 @@ class ShortcutsPlugin(BasePlugin):
                 self._cleanup_missing_shortcuts(restore_menus=False, notify=False)
             self._restore_shortcuts()
             update_quick_access(self)
-            self._deeplink_unhook = register_deeplink_hook(self)
+            threading.Thread(target=self._register_deeplink_hook_async, daemon=True).start()
         except Exception as e:
             log(f"[{__id__}] on_plugin_load: {e}")
+
+    def _register_deeplink_hook_async(self):
+        try:
+            self._deeplink_unhook = register_deeplink_hook(self)
+        except Exception as e:
+            log(f"[{__id__}] async deeplink hook: {e}")
 
     def on_plugin_unload(self):
         self._clear_menu_items()

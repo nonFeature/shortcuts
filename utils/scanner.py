@@ -29,8 +29,6 @@ def _has_settings(pid):
         lst = ctrl.getPluginSettingsList(pid)
         if lst is not None:
             return True
-        if ctrl.hasPluginSettingsPreferences(pid):
-            return True
     except Exception:
         pass
     return False
