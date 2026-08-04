@@ -122,11 +122,26 @@ def _show_dialog_safe(frag, dialog):
 
 
 def _loc_label(loc):
-    if loc == "chat":
-        return _s("chat_menu")
-    if loc == "both":
-        return _s("both_places")
-    return _s("drawer")
+    locations = _sc_locations({"location": loc} if isinstance(loc, str) else loc)
+    labels = {
+        "drawer": _s("drawer"),
+        "chat": _s("chat_menu"),
+        "message": _s("message_menu"),
+        "profile": _s("profile_menu"),
+    }
+    return " + ".join(labels[location] for location in locations) if locations else _s("drawer")
+
+
+def _sc_locations(sc):
+    locations = sc.get("locations") if isinstance(sc, dict) else None
+    if isinstance(locations, (list, tuple)):
+        return [location for location in locations if location in {"drawer", "chat", "message", "profile"}]
+    location = sc.get("location", "drawer") if isinstance(sc, dict) else sc
+    if location == "both":
+        return ["drawer", "chat"]
+    if location in {"drawer", "chat", "message", "profile"}:
+        return [location]
+    return ["drawer"]
 
 
 def _shortcut_title(sc):

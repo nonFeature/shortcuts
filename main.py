@@ -19,6 +19,7 @@ from utils.helpers import (
     _plugin_name,
     _remove_menu_item_safe,
     _sc_label,
+    _sc_locations,
     _setting_value_key,
     _shortcut_title,
 )
@@ -258,12 +259,13 @@ class ShortcutsPlugin(BasePlugin):
     def _register_menu(self, sc):
         label = sc.get("label") or _sc_label(sc)
         icon = sc.get("icon") or "media_settings"
-        loc = sc.get("location", "drawer")
-        menu_types = (
-            [MenuItemType.DRAWER_MENU, MenuItemType.CHAT_ACTION_MENU]
-            if loc == "both"
-            else [MenuItemType.DRAWER_MENU if loc == "drawer" else MenuItemType.CHAT_ACTION_MENU]
-        )
+        menu_type_by_location = {
+            "drawer": MenuItemType.DRAWER_MENU,
+            "chat": MenuItemType.CHAT_ACTION_MENU,
+            "message": MenuItemType.MESSAGE_CONTEXT_MENU,
+            "profile": MenuItemType.PROFILE_ACTION_MENU,
+        }
+        menu_types = [menu_type_by_location[location] for location in _sc_locations(sc)]
         for mt in menu_types:
             mid = self.add_menu_item(MenuItemData(menu_type=mt, text=label, icon=icon, priority=10, on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc)))
             if mid:

@@ -53,9 +53,13 @@ def _handle_deeplink(plugin, url_str):
             sub_fragment = str(uri.getQueryParameter("sub_fragment") or "")
             label = str(uri.getQueryParameter("label") or "")
             icon = str(uri.getQueryParameter("icon") or "media_settings")
+            locations_param = str(uri.getQueryParameter("locations") or "")
             loc = str(uri.getQueryParameter("location") or "drawer")
+            locations = [item for item in locations_param.split(",") if item] if locations_param else None
 
             sc = {"type": stype, "plugin_id": pid, "location": loc, "label": label, "icon": icon, "setting_key": setting_key, "sub_fragment": sub_fragment}
+            if locations:
+                sc["locations"] = locations
 
             frag, context = _dialog_context()
             if not context:
@@ -96,7 +100,9 @@ def _generate_deeplink(plugin, sc):
         lbl = sc.get("label", "")
         ic = sc.get("icon", "media_settings")
         loc = sc.get("location", "drawer")
-        link = f"tg://shortcut?type={urllib.parse.quote(stype)}&plugin_id={urllib.parse.quote(pid)}&setting_key={urllib.parse.quote(sk)}&sub_fragment={urllib.parse.quote(sub)}&label={urllib.parse.quote(lbl)}&icon={urllib.parse.quote(ic)}&location={urllib.parse.quote(loc)}"
+        locations = ",".join(sc.get("locations") or [])
+        locations_query = f"&locations={urllib.parse.quote(locations)}" if locations else ""
+        link = f"tg://shortcut?type={urllib.parse.quote(stype)}&plugin_id={urllib.parse.quote(pid)}&setting_key={urllib.parse.quote(sk)}&sub_fragment={urllib.parse.quote(sub)}&label={urllib.parse.quote(lbl)}&icon={urllib.parse.quote(ic)}&location={urllib.parse.quote(loc)}{locations_query}"
         return link
     except Exception as e:
         log(f"[{__id__}] _generate_deeplink: {e}")
