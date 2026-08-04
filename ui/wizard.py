@@ -2,7 +2,7 @@ import threading
 import traceback
 
 from android_utils import run_on_ui_thread
-from client_utils import log
+from client_utils import get_last_fragment, log
 from org.telegram.messenger import ApplicationLoader
 from ui.bulletin import BulletinHelper
 
@@ -176,6 +176,8 @@ def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=Non
 
 
 def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_index=None):
+    wizard_fragment = get_last_fragment()
+
     def _do():
         try:
             ctrl = _ctrl()
@@ -236,12 +238,22 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
             message_key = "shortcut_updated" if edit_index is not None else "shortcut_created"
             run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s(message_key)}: {label}"))
             ctrl.loadPluginSettings(__id__)
+            run_on_ui_thread(lambda: _finish_wizard_fragment(wizard_fragment))
         except Exception as e:
             log(f"[{__id__}] wizard_finalize error: {e}\n{traceback.format_exc()}")
             err_msg = str(e)
             run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
 
     threading.Thread(target=_do, daemon=True).start()
+
+
+def _finish_wizard_fragment(fragment=None):
+    try:
+        fragment = fragment or get_last_fragment()
+        if fragment:
+            fragment.finishFragment()
+    except Exception as e:
+        log(f"[{__id__}] close wizard fragment: {e}")
 
 
 def _get_setting_string(key, default=""):

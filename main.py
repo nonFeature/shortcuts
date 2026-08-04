@@ -268,5 +268,15 @@ class ShortcutsPlugin(BasePlugin):
             sc_list.pop(idx)
             self._save_shortcuts(sc_list)
             self._restore_shortcuts()
+
+            def _finish_action_fragment():
+                try:
+                    fragment = get_last_fragment()
+                    if fragment:
+                        fragment.finishFragment()
+                except Exception as e:
+                    log(f"[{__id__}] close removed shortcut fragment: {e}")
+
             run_on_ui_thread(lambda: BulletinHelper.show_success(_s("shortcut_removed")))
+            run_on_ui_thread(_finish_action_fragment)
             _ctrl().loadPluginSettings(__id__)
