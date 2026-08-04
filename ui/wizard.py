@@ -3,12 +3,13 @@ import traceback
 
 from android_utils import run_on_ui_thread
 from client_utils import log
+from org.telegram.messenger import ApplicationLoader
 from ui.bulletin import BulletinHelper
 
 from data.constants import PRESET_ICONS
 from header import __id__
 from i18n.locales import _s
-from ui.settings import Divider, Input, Selector, Text
+from ui.settings import Divider, Header, Input, Selector, Text
 from utils.helpers import _ctrl, _plugin_name, _sc_label, _setting_value_key
 from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settings_reliably, _plugin_ids
 
@@ -112,8 +113,16 @@ def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=Non
 
     items.append(Input(key="__wiz_label", text=_s("custom_label"), default=def_label))
 
-    icon_names = [pair[1] for pair in PRESET_ICONS]
-    items.append(Selector(key="__wiz_icon", text=_s("custom_icon"), items=icon_names, default=0))
+    icon_key = _selected_icon_key()
+    icon_title = _icon_title(icon_key)
+    items.append(
+        Text(
+            text=_s("custom_icon"),
+            subtext=icon_title,
+            icon=icon_key,
+            create_sub_fragment=lambda: build_icon_picker(plugin),
+        )
+    )
 
     items.append(Divider())
     items.append(Text(text=_s("create"), accent=True, on_click=lambda v: wizard_finalize(plugin, pids, stype, sub_keys=sub_keys, settings=settings)))
@@ -126,7 +135,6 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None):
             ctrl = _ctrl()
             loc_i = ctrl.getPluginSettingInt(__id__, "__wiz_loc", 0)
             plug_i = ctrl.getPluginSettingInt(__id__, "__wiz_plugin", 0)
-            icon_i = ctrl.getPluginSettingInt(__id__, "__wiz_icon", 0)
             custom_label = ctrl.getPluginSettingString(__id__, "__wiz_label", "").strip()
 
             loc = "both" if loc_i == 2 else ("drawer" if loc_i == 0 else "chat")
@@ -134,9 +142,10 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None):
                 plug_i = 0
             pid = pids[plug_i]
 
-            if icon_i < 0 or icon_i >= len(PRESET_ICONS):
-                icon_i = 0
-            icon_key = PRESET_ICONS[icon_i][0]
+            icon_key = _selected_icon_key()
+            if not _icon_exists(icon_key):
+                run_on_ui_thread(lambda: BulletinHelper.show_info(_s("icon_not_found")))
+                return
 
             sc = {"type": stype, "plugin_id": pid, "location": loc, "label": custom_label, "icon": icon_key}
 
@@ -175,3 +184,107 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None):
             run_on_ui_thread(lambda: BulletinHelper.show_info(err_msg))
 
     threading.Thread(target=_do, daemon=True).start()
+
+
+def _get_setting_string(key, default=""):
+    try:
+        return str(_ctrl().getPluginSettingString(__id__, key, default) or "").strip()
+    except Exception:
+        return default
+
+
+def _icon_exists(icon_key):
+    icon_key = str(icon_key or "").strip()
+    if not icon_key:
+        return False
+    if icon_key in {key for key, _ in PRESET_ICONS}:
+        return True
+    if "/" in icon_key or " " in icon_key:
+        return False
+    try:
+        context = ApplicationLoader.applicationContext
+        resources = context.getResources()
+        package_name = context.getPackageName()
+        return int(resources.getIdentifier(icon_key, "drawable", package_name)) != 0
+    except Exception as e:
+        log(f"[{__id__}] icon lookup failed for {icon_key}: {e}")
+        return False
+
+
+def _selected_icon_key():
+    custom_key = _get_setting_string("__wiz_custom_icon")
+    if custom_key:
+        return custom_key
+
+    saved_key = _get_setting_string("__wiz_icon")
+    if saved_key in {key for key, _ in PRESET_ICONS}:
+        return saved_key
+    try:
+        old_index = int(saved_key) if saved_key else _ctrl().getPluginSettingInt(__id__, "__wiz_icon", 0)
+        if 0 <= old_index < len(PRESET_ICONS):
+            return PRESET_ICONS[old_index][0]
+    except Exception:
+        pass
+    return PRESET_ICONS[0][0]
+
+
+def _icon_title(icon_key):
+    for key, title in PRESET_ICONS:
+        if key == icon_key:
+            return title
+    return icon_key or PRESET_ICONS[0][1]
+
+
+def _save_selected_icon(plugin, icon_key):
+    icon_key = str(icon_key or "").strip()
+    if not _icon_exists(icon_key):
+        run_on_ui_thread(lambda: BulletinHelper.show_info(_s("icon_not_found")))
+        return
+    try:
+        ctrl = _ctrl()
+        ctrl.setPluginSetting(__id__, "__wiz_icon", icon_key)
+        ctrl.setPluginSetting(__id__, "__wiz_custom_icon", "")
+        ctrl.loadPluginSettings(__id__)
+    except Exception as e:
+        log(f"[{__id__}] select icon error: {e}")
+
+
+def _save_custom_icon(plugin):
+    icon_key = _get_setting_string("__wiz_custom_icon")
+    if not _icon_exists(icon_key):
+        run_on_ui_thread(lambda: BulletinHelper.show_info(_s("icon_not_found")))
+        return
+    try:
+        ctrl = _ctrl()
+        ctrl.setPluginSetting(__id__, "__wiz_icon", icon_key)
+        ctrl.loadPluginSettings(__id__)
+        run_on_ui_thread(lambda: BulletinHelper.show_info(_s("icon_found")))
+    except Exception as e:
+        log(f"[{__id__}] custom icon save error: {e}")
+
+
+def build_icon_picker(plugin):
+    items = [Header(text=_s("choose_icon"))]
+    for icon_key, icon_title in PRESET_ICONS:
+        items.append(
+            Text(
+                text=icon_title,
+                icon=icon_key,
+                on_click=lambda _value, key=icon_key: _save_selected_icon(plugin, key),
+            )
+        )
+    items.append(Divider())
+    custom_key = _get_setting_string("__wiz_custom_icon")
+    items.append(
+        Input(
+            key="__wiz_custom_icon",
+            text=_s("custom_icon_name"),
+            subtext=_s("custom_icon_name_sub"),
+            default=custom_key,
+        )
+    )
+    if custom_key:
+        status_key = "icon_found" if _icon_exists(custom_key) else "icon_not_found"
+        items.append(Text(text=_s(status_key), red=status_key == "icon_not_found"))
+    items.append(Text(text=_s("check_icon"), accent=True, on_click=lambda _value: _save_custom_icon(plugin)))
+    return items
