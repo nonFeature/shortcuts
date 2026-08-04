@@ -19,6 +19,7 @@ from utils.helpers import (
     _ctrl,
     _plugin_exists,
     _plugin_name,
+    _remove_menu_item_safe,
     _sc_label,
     _setting_value_key,
     _shortcut_title,
@@ -46,11 +47,8 @@ class ShortcutsPlugin(BasePlugin):
 
     def on_plugin_unload(self):
         self._clear_menu_items()
-        if self._qa_mid:
-            try:
-                self.remove_menu_item(self._qa_mid)
-            except Exception:
-                pass
+        _remove_menu_item_safe(self, self._qa_mid)
+        self._qa_mid = None
         if self._deeplink_unhook:
             try:
                 if isinstance(self._deeplink_unhook, list):
@@ -289,10 +287,7 @@ class ShortcutsPlugin(BasePlugin):
 
     def _clear_menu_items(self):
         for mid in self._menu_items:
-            try:
-                self.remove_menu_item(mid)
-            except Exception:
-                pass
+            _remove_menu_item_safe(self, mid)
         self._menu_items = []
 
     def _register_menu(self, sc):

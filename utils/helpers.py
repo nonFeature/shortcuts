@@ -35,10 +35,7 @@ def _to_py_list(seq):
         pass
     try:
         arr = seq.toArray()
-        try:
-            return list(arr)
-        except Exception:
-            return list(arr)
+        return list(arr)
     except Exception:
         pass
     try:
@@ -47,6 +44,15 @@ def _to_py_list(seq):
     except Exception:
         pass
     return []
+
+
+def _remove_menu_item_safe(plugin, menu_id):
+    if not menu_id:
+        return
+    try:
+        plugin.remove_menu_item(menu_id)
+    except Exception:
+        pass
 
 
 def _open_link_key(prefix, key, alias=None):

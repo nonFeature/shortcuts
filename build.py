@@ -18,6 +18,8 @@ PRIORITY_DIRS = ["data", "i18n", "utils", "features", "ui"]
 LAST_FILES = ["main.py"]
 
 INTERNAL_MODULES = ("data", "i18n", "utils", "features", "ui", "header")
+LOCAL_UI_SETTINGS_NAMES = {"build_settings_list", "show_input_dialog", "show_selector_dialog"}
+SDK_UI_SETTINGS_NAMES = {"Divider", "Header", "Input", "Selector", "Switch", "Text"}
 
 COPYRIGHT_STRING = "# Shortcuts plugin for exteraGram / Ayugram\n# Plugin by @feature_plugins\n"
 
@@ -151,8 +153,19 @@ def normalize_import_block(import_lines: list[str]) -> str:
 def _is_internal(mod_name):
     if not mod_name:
         return False
+    if mod_name == "ui.settings":
+        return False
     top = mod_name.split(".")[0]
     return top in INTERNAL_MODULES or top == "Shortcuts"
+
+
+def _normalize_ui_settings_import(block: str) -> str | None:
+    match = re.match(r"^from ui\.settings import (.+)$", block)
+    if not match:
+        return None
+    names = [name.strip() for name in match.group(1).split(",")]
+    external_names = [name for name in names if name in SDK_UI_SETTINGS_NAMES]
+    return f"from ui.settings import {', '.join(external_names)}" if external_names else ""
 
 
 def generate_imports_block() -> str:
@@ -230,7 +243,11 @@ def process_file_content(file_path: Path) -> list[str]:
             mod_match = re.match(r"^(?:from|import)\s+([\w.]+)", block)
             mod_name = mod_match.group(1) if mod_match else ""
 
-            if not _is_internal(mod_name):
+            if mod_name == "ui.settings":
+                sdk_import = _normalize_ui_settings_import(block)
+                if sdk_import:
+                    parse_import_line(sdk_import)
+            elif not _is_internal(mod_name):
                 parse_import_line(block)
             i += 1
             continue
@@ -354,7 +371,8 @@ def build():
                 full_code = COPYRIGHT_STRING + "\n" + combined_code
         else:
             rename_locals = level == "max"
-            hoist_literals = level == "max"
+            # Keep plugin metadata values, such as __id__, directly readable.
+            hoist_literals = False
             try:
                 import python_minifier
 

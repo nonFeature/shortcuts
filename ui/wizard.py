@@ -8,40 +8,20 @@ from ui.bulletin import BulletinHelper
 from data.constants import PRESET_ICONS
 from header import __id__
 from i18n.locales import _s
-from ui.settings import Divider, Header, Input, Selector, Text
+from ui.settings import Divider, Input, Selector, Text
 from utils.helpers import _ctrl, _plugin_name, _sc_label, _setting_value_key
 from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settings_reliably, _plugin_ids
 
 
 def build_wizard_step1(plugin):
-    items = []
-    items.append(Header(text=_s("location")))
-    items.append(Selector(key="__wiz_loc", text=_s("location"), items=[_s("drawer"), _s("chat_menu"), _s("both_places")], default=0))
-    items.append(Header(text=_s("type")))
-    items.append(Selector(key="__wiz_type", text=_s("type"), items=[_s("toggle_plugin"), _s("open_settings"), _s("operate_setting")], default=0))
-    items.append(Text(text=_s("next"), accent=True, create_sub_fragment=lambda: build_wizard_step2(plugin)))
-    return items
-
-
-def build_wizard_step2(plugin):
     def _build():
-        try:
-            type_i = _ctrl().getPluginSettingInt(__id__, "__wiz_type", 0)
-        except Exception:
-            type_i = 0
-
-        pids = []
-        if type_i == 0:  # toggle_plugin
-            pids = _plugin_ids()
-        elif type_i == 1:  # open_settings / sub-page
-            pids = [pid for pid in _plugin_ids() if _has_settings_reliably(pid)]
-        else:  # operate_setting
-            pids = [pid for pid in _plugin_ids() if _has_settings_reliably(pid)]
-
+        items = [
+            Selector(key="__wiz_loc", text=_s("location"), items=[_s("drawer"), _s("chat_menu"), _s("both_places")], default=0),
+            Divider(),
+        ]
+        pids = _plugin_ids()
         if not pids:
-            return [Divider(text=_s("no_plugins"))]
-
-        pnames = [_plugin_name(p) for p in pids]
+            return [*items, Divider(text=_s("no_plugins"))]
 
         try:
             plug_i = _ctrl().getPluginSettingInt(__id__, "__wiz_plugin", 0)
@@ -51,64 +31,69 @@ def build_wizard_step2(plugin):
             plug_i = 0
         selected_pid = pids[plug_i]
 
-        items = []
+        items.append(
+            Selector(
+                key="__wiz_plugin",
+                text=_s("plugins"),
+                items=[_plugin_name(pid) for pid in pids],
+                default=plug_i,
+                on_change=lambda value: _ctrl().setPluginSetting(__id__, "__wiz_plugin", int(value)),
+            )
+        )
+        items.append(Divider())
 
-        def _on_plugin_changed(idx):
+        if not _has_settings_reliably(selected_pid):
             try:
-                _ctrl().setPluginSetting(__id__, "__wiz_subfragment", 0)
-                _ctrl().loadPluginSettings(__id__)
-            except Exception as e:
-                log(f"[{__id__}] _on_plugin_changed: {e}")
+                current_type = _ctrl().getPluginSettingInt(__id__, "__wiz_type", 0)
+            except Exception:
+                current_type = 0
+            if current_type != 0:
+                _ctrl().setPluginSetting(__id__, "__wiz_type", 0)
+            items.append(Divider(text=_s("toggle_only_warning")))
+            items.append(Divider())
+            items.extend(build_wizard_step_customize(plugin, pids, "toggle_plugin"))
+            return items
 
-        items.append(Header(text=_s("plugins")))
-        items.append(Selector(key="__wiz_plugin", text=_s("plugins"), items=pnames, default=plug_i, on_change=_on_plugin_changed))
+        try:
+            type_i = _ctrl().getPluginSettingInt(__id__, "__wiz_type", 0)
+        except Exception:
+            type_i = 0
+        if type_i < 0 or type_i > 2:
+            type_i = 0
 
-        sub_keys = ["root"]
-        if type_i == 1:  # open_settings
+        items.append(
+            Selector(
+                key="__wiz_type",
+                text=_s("type"),
+                items=[_s("toggle_plugin"), _s("open_settings"), _s("operate_setting")],
+                default=type_i,
+                on_change=lambda value: _ctrl().setPluginSetting(__id__, "__wiz_type", int(value)),
+            )
+        )
+
+        if type_i == 1:
+            sub_keys = ["root"]
             subs = _collect_sub_fragments(selected_pid)
             if subs:
                 sub_titles = [_s("root_settings")]
                 for sub in subs:
                     sub_keys.append(sub["key"])
                     sub_titles.append(sub["text"])
-
-                items.append(Header(text=_s("sub_fragment")))
                 items.append(Selector(key="__wiz_subfragment", text=_s("sub_fragment"), items=sub_titles, default=0))
+            items.append(Divider())
+            items.extend(build_wizard_step_customize(plugin, pids, "open_settings", sub_keys=sub_keys))
+        elif type_i == 2:
+            settings = _collect_settings(selected_pid)
+            if not settings:
+                return [Divider(text=_s("no_settings"))]
+            names = [s.get("text", s.get("key", "")) for s in settings]
+            items.append(Selector(key="__wiz_setting", text=_s("select_setting"), items=names, default=0))
+            items.append(Divider())
+            items.extend(build_wizard_step_customize(plugin, pids, "operate_setting", settings=settings))
+        else:
+            items.append(Divider())
+            items.extend(build_wizard_step_customize(plugin, pids, "toggle_plugin"))
 
-            items.append(
-                Text(text=_s("next"), accent=True, create_sub_fragment=lambda: build_wizard_step_customize(plugin, pids, "open_settings", sub_keys=sub_keys))
-            )
-        elif type_i == 2:  # operate_setting -> choose setting
-            items.append(Text(text=_s("next"), accent=True, create_sub_fragment=lambda: build_wizard_step3_setting(plugin, pids)))
-        else:  # toggle_plugin -> custom label & icon
-            items.append(Text(text=_s("next"), accent=True, create_sub_fragment=lambda: build_wizard_step_customize(plugin, pids, "toggle_plugin")))
-
-        return items
-
-    return plugin._with_spinner(_build)
-
-
-def build_wizard_step3_setting(plugin, pids):
-    def _build():
-        try:
-            plug_i = _ctrl().getPluginSettingInt(__id__, "__wiz_plugin", 0)
-        except Exception:
-            plug_i = 0
-        if plug_i < 0 or plug_i >= len(pids):
-            plug_i = 0
-        pid = pids[plug_i]
-
-        settings = _collect_settings(pid)
-        if not settings:
-            return [Divider(text=_s("no_settings"))]
-
-        names = [s.get("text", s.get("key", "")) for s in settings]
-        items = []
-        items.append(Header(text=_s("select_setting")))
-        items.append(Selector(key="__wiz_setting", text=_s("select_setting"), items=names, default=0))
-        items.append(
-            Text(text=_s("next"), accent=True, create_sub_fragment=lambda: build_wizard_step_customize(plugin, pids, "operate_setting", settings=settings))
-        )
         return items
 
     return plugin._with_spinner(_build)
@@ -116,8 +101,6 @@ def build_wizard_step3_setting(plugin, pids):
 
 def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=None):
     items = []
-    items.append(Header(text=_s("custom_label")))
-
     try:
         plug_i = _ctrl().getPluginSettingInt(__id__, "__wiz_plugin", 0)
     except Exception:
@@ -129,10 +112,10 @@ def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=Non
 
     items.append(Input(key="__wiz_label", text=_s("custom_label"), default=def_label))
 
-    items.append(Header(text=_s("custom_icon")))
     icon_names = [pair[1] for pair in PRESET_ICONS]
     items.append(Selector(key="__wiz_icon", text=_s("custom_icon"), items=icon_names, default=0))
 
+    items.append(Divider())
     items.append(Text(text=_s("create"), accent=True, on_click=lambda v: wizard_finalize(plugin, pids, stype, sub_keys=sub_keys, settings=settings)))
     return items
 
