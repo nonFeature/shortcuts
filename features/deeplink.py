@@ -93,16 +93,29 @@ def _handle_deeplink(plugin, url_str):
 
 def _generate_deeplink(plugin, sc):
     try:
-        stype = sc.get("type", "toggle_plugin")
-        pid = sc.get("plugin_id", "")
-        sk = sc.get("setting_key", "")
-        sub = sc.get("sub_fragment", "")
-        lbl = sc.get("label", "")
-        ic = sc.get("icon", "media_settings")
-        loc = sc.get("location", "drawer")
-        locations = ",".join(sc.get("locations") or [])
+        stype = str(sc.get("type") or "toggle_plugin")
+        pid = str(sc.get("plugin_id") or "")
+        sk = str(sc.get("setting_key") or "")
+        sub = str(sc.get("sub_fragment") or "")
+        lbl = str(sc.get("label") or "")
+        ic = str(sc.get("icon") or "media_settings")
+        loc = str(sc.get("location") or "drawer")
+        raw_locations = sc.get("locations")
+        if isinstance(raw_locations, (list, tuple)):
+            locations = ",".join(str(x) for x in raw_locations if x)
+        else:
+            locations = ""
         locations_query = f"&locations={urllib.parse.quote(locations)}" if locations else ""
-        link = f"tg://shortcut?type={urllib.parse.quote(stype)}&plugin_id={urllib.parse.quote(pid)}&setting_key={urllib.parse.quote(sk)}&sub_fragment={urllib.parse.quote(sub)}&label={urllib.parse.quote(lbl)}&icon={urllib.parse.quote(ic)}&location={urllib.parse.quote(loc)}{locations_query}"
+        link = (
+            f"tg://shortcut?type={urllib.parse.quote(stype)}"
+            f"&plugin_id={urllib.parse.quote(pid)}"
+            f"&setting_key={urllib.parse.quote(sk)}"
+            f"&sub_fragment={urllib.parse.quote(sub)}"
+            f"&label={urllib.parse.quote(lbl)}"
+            f"&icon={urllib.parse.quote(ic)}"
+            f"&location={urllib.parse.quote(loc)}"
+            f"{locations_query}"
+        )
         return link
     except Exception as e:
         log(f"[{__id__}] _generate_deeplink: {e}")
@@ -110,18 +123,16 @@ def _generate_deeplink(plugin, sc):
 
 
 def copy_deeplink(plugin, sc):
-    link = _generate_deeplink(plugin, sc)
-    if link:
+    try:
+        link = _generate_deeplink(plugin, sc)
+        if not link:
+            run_on_ui_thread(lambda: BulletinHelper.show_error(_s("error")))
+            return
 
-        def _notify():
-            AndroidUtilities.addToClipboard(link)
-            try:
-                BulletinHelper.show_copied_to_clipboard(_s("deeplink_copied"))
-            except Exception as e:
-                log(f"[{__id__}] copied bulletin fallback: {e}")
-                try:
-                    BulletinHelper.show_success(_s("deeplink_copied"))
-                except Exception:
-                    BulletinHelper.show_success(_s("deeplink_copied"))
-
-        run_on_ui_thread(_notify)
+        AndroidUtilities.addToClipboard(link)
+        msg = _s("deeplink_copied")
+        run_on_ui_thread(lambda: BulletinHelper.show_success(msg))
+    except Exception as e:
+        log(f"[{__id__}] copy_deeplink error: {e}")
+        err_msg = str(e)
+        run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
