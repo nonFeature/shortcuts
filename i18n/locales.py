@@ -123,7 +123,7 @@ STRINGS = {
         "auto_remove_missing_sub": "Удалять ярлык, если плагин был удалён",
         "missing_shortcuts_removed": "Удалено ярлыков",
         "sub_fragment": "Подстраница",
-        "root_settings": "Корневая страница",
+        "root_settings": "Главная страница",
         "custom_label": "Название",
         "custom_icon": "Иконка",
         "custom_icon_name": "Своя иконка",
