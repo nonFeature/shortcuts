@@ -416,7 +416,7 @@ def _remember_custom_icon(value):
 
 
 def build_icon_picker(plugin):
-    items = [Header(text=_s("choose_icon"))]
+    items = []
     for icon_key, title_key in PRESET_ICONS:
         items.append(
             Text(
