@@ -32,7 +32,7 @@ def build_settings_list(plugin):
         )
         settings.append(Divider())
 
-    settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=lambda: build_new_wizard(plugin)))
+    settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=build_new_wizard(plugin)))
 
     settings.append(Header(text=_s("actions")))
     settings.append(
@@ -57,7 +57,7 @@ def build_shortcut_actions(plugin, index, sc):
         Text(
             text=_s("edit_shortcut"),
             icon="msg_edit",
-            create_sub_fragment=lambda: build_wizard_step1(plugin, edit_index=index),
+            create_sub_fragment=build_wizard_step1(plugin, edit_index=index),
         ),
         Text(text=_s("copy_deeplink"), icon="msg_copy", on_click=lambda _value: copy_deeplink(plugin, sc)),
         Text(text=_s("remove_shortcut"), icon="msg_delete", red=True, on_click=lambda _value: plugin._remove_shortcut(index)),

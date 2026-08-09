@@ -70,7 +70,7 @@ def _handle_deeplink(plugin, url_str):
             builder.setTitle(_s("add_shortcut"))
             dis_label = label or _sc_label(sc)
             builder.setMessage(
-                f"{_s('add_deeplink_confirm')}\n\n{_s('custom_label')}: {dis_label}\n{_s('plugins')}: {_plugin_name(pid)}\n{_s('location')}: {_loc_label(loc)}"
+                f"{_s('add_deeplink_confirm')}\n\n{_s('custom_label')}: {dis_label}\n{_s('plugins')}: {_plugin_name(pid)}\n{_s('location')}: {_loc_label(sc)}"
             )
 
             class AddClick(dynamic_proxy(jclass("org.telegram.ui.ActionBar.AlertDialog$OnButtonClickListener"))):

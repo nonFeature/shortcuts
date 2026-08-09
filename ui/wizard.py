@@ -14,53 +14,107 @@ from ui.settings import Divider, Header, Input, Selector, Switch, Text
 from utils.helpers import _ctrl, _plugin_name, _sc_label, _sc_locations, _setting_value_key
 from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settings_reliably, _plugin_ids
 
-_EDIT_SESSION = None
-_CREATE_SESSION = False
 LOCATION_KEYS = ("drawer", "chat", "message", "profile")
 
 
-def build_new_wizard(plugin):
-    global _CREATE_SESSION, _EDIT_SESSION
-    _CREATE_SESSION = False
-    _EDIT_SESSION = None
+def _init_new_wizard_state(plugin, pids):
+    selected_pid = pids[0] if pids else ""
     for location_key in LOCATION_KEYS:
-        plugin.set_setting(f"__wiz_loc_{location_key}", False)
-    return build_wizard_step1(plugin)
+        plugin.set_setting(f"__wiz_loc_{location_key}", location_key == "drawer")
+    plugin.set_setting("__wiz_plugin", 0)
+    plugin.set_setting("__wiz_type", 0)
+    plugin.set_setting("__wiz_subfragment", 0)
+    plugin.set_setting("__wiz_setting", 0)
+    plugin.set_setting("__wiz_label", _plugin_name(selected_pid) if selected_pid else "")
+    plugin.set_setting("__wiz_icon", "media_settings")
+    plugin.set_setting("__wiz_custom_icon", "")
+
+
+def _init_edit_wizard_state(plugin, edit_index, pids):
+    shortcuts = plugin._load_shortcuts()
+    if not (0 <= edit_index < len(shortcuts)):
+        return
+    sc = shortcuts[edit_index]
+    pid = sc.get("plugin_id", "")
+    try:
+        plugin_index = pids.index(pid)
+    except ValueError:
+        plugin_index = 0
+    locations = set(_sc_locations(sc))
+    type_index = {"toggle_plugin": 0, "open_settings": 1, "operate_setting": 2}.get(sc.get("type"), 0)
+    for location_key in LOCATION_KEYS:
+        plugin.set_setting(f"__wiz_loc_{location_key}", location_key in locations)
+    plugin.set_setting("__wiz_plugin", plugin_index)
+    plugin.set_setting("__wiz_type", type_index)
+    plugin.set_setting("__wiz_label", str(sc.get("label", "") or ""))
+    plugin.set_setting("__wiz_icon", str(sc.get("icon", "media_settings") or "media_settings"))
+    plugin.set_setting("__wiz_custom_icon", "")
+
+
+def build_new_wizard(plugin):
+    initialized = False
+
+    def _render():
+        nonlocal initialized
+        pids = _plugin_ids()
+        if not initialized:
+            _init_new_wizard_state(plugin, pids)
+            initialized = True
+        return _render_wizard(plugin, pids, edit_index=None)
+
+    return _render
 
 
 def build_wizard_step1(plugin, edit_index=None):
-    def _build():
-        global _CREATE_SESSION, _EDIT_SESSION
+    initialized = False
 
+    def _render():
+        nonlocal initialized
         pids = _plugin_ids()
+        if not initialized:
+            if edit_index is not None:
+                _init_edit_wizard_state(plugin, edit_index, pids)
+            else:
+                _init_new_wizard_state(plugin, pids)
+            initialized = True
+        return _render_wizard(plugin, pids, edit_index=edit_index)
+
+    return _render
+
+
+def _render_wizard(plugin, pids, edit_index=None):
+    def _build():
+        ctrl = _ctrl()
         editing_sc = None
         if edit_index is not None:
             shortcuts = plugin._load_shortcuts()
             if 0 <= edit_index < len(shortcuts):
                 editing_sc = shortcuts[edit_index]
-                if _EDIT_SESSION != edit_index:
-                    _prime_edit_state(plugin, editing_sc, pids)
-                    _EDIT_SESSION = edit_index
 
-        edit_locations = set(_sc_locations(editing_sc)) if editing_sc else set()
         items = [
-            Switch(key=f"__wiz_loc_{key}", text=_s(label_key), default=key in edit_locations)
-            for key, label_key in (("drawer", "drawer"), ("chat", "chat_menu"), ("message", "message_menu"), ("profile", "profile_menu"))
+            Switch(
+                key=f"__wiz_loc_{key}",
+                text=_s(label_key),
+                default=ctrl.getPluginSettingBoolean(__id__, f"__wiz_loc_{key}", False),
+            )
+            for key, label_key in (
+                ("drawer", "drawer"),
+                ("chat", "chat_menu"),
+                ("message", "message_menu"),
+                ("profile", "profile_menu"),
+            )
         ]
         items.append(Divider(text=_s("location_hint")))
         if not pids:
             return [*items, Divider(text=_s("no_plugins"))]
 
         try:
-            plug_i = _ctrl().getPluginSettingInt(__id__, "__wiz_plugin", 0)
+            plug_i = ctrl.getPluginSettingInt(__id__, "__wiz_plugin", 0)
         except Exception:
             plug_i = 0
         if plug_i < 0 or plug_i >= len(pids):
             plug_i = 0
         selected_pid = pids[plug_i]
-        if edit_index is None and not _CREATE_SESSION:
-            plugin.set_setting("__wiz_label", _plugin_name(selected_pid))
-            _CREATE_SESSION = True
 
         items.append(
             Selector(
@@ -68,25 +122,19 @@ def build_wizard_step1(plugin, edit_index=None):
                 text=_s("plugins"),
                 items=[_plugin_name(pid) for pid in pids],
                 default=plug_i,
-                on_change=lambda value: _on_plugin_change(value, pids),
+                on_change=lambda value: _on_plugin_change(plugin, value, pids),
             )
         )
         items.append(Divider())
 
         if not _has_settings_reliably(selected_pid):
-            try:
-                current_type = _ctrl().getPluginSettingInt(__id__, "__wiz_type", 0)
-            except Exception:
-                current_type = 0
-            if current_type != 0:
-                plugin.set_setting("__wiz_type", 0)
             items.append(Divider(text=_s("toggle_only_warning")))
             items.append(Divider())
             items.extend(build_wizard_step_customize(plugin, pids, "toggle_plugin", edit_index=edit_index))
             return items
 
         try:
-            type_i = _ctrl().getPluginSettingInt(__id__, "__wiz_type", 0)
+            type_i = ctrl.getPluginSettingInt(__id__, "__wiz_type", 0)
         except Exception:
             type_i = 0
         if type_i < 0 or type_i > 2:
@@ -135,11 +183,12 @@ def build_wizard_step1(plugin, edit_index=None):
         return [Header(text=_s("add_shortcut")), Divider(text=f"{_s('error')}: {e}")]
 
 
-def _on_plugin_change(value, pids):
+def _on_plugin_change(plugin, value, pids):
     try:
         index = int(value)
         if 0 <= index < len(pids):
             pid = pids[index]
+            plugin.set_setting("__wiz_label", _plugin_name(pid))
             _ctrl().loadPluginSettings(pid)
     except Exception as e:
         log(f"[{__id__}] plugin selection error: {e}")
@@ -154,7 +203,8 @@ def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=Non
     if plug_i < 0 or plug_i >= len(pids):
         plug_i = 0
     pid = pids[plug_i]
-    def_label = _plugin_name(pid)
+    saved_label = _get_setting_string("__wiz_label")
+    def_label = saved_label if saved_label else _plugin_name(pid)
 
     items.append(Input(key="__wiz_label", text=_s("custom_label"), default=def_label))
 
@@ -270,23 +320,6 @@ def _get_setting_string(key, default=""):
         return default
 
 
-def _prime_edit_state(plugin, sc, pids):
-    pid = sc.get("plugin_id", "")
-    try:
-        plugin_index = pids.index(pid)
-    except ValueError:
-        plugin_index = 0
-    locations = set(_sc_locations(sc))
-    type_index = {"toggle_plugin": 0, "open_settings": 1, "operate_setting": 2}.get(sc.get("type"), 0)
-    for location_key in LOCATION_KEYS:
-        plugin.set_setting(f"__wiz_loc_{location_key}", location_key in locations)
-    plugin.set_setting("__wiz_plugin", plugin_index)
-    plugin.set_setting("__wiz_type", type_index)
-    plugin.set_setting("__wiz_label", str(sc.get("label", "") or ""))
-    plugin.set_setting("__wiz_icon", str(sc.get("icon", "media_settings") or "media_settings"))
-    plugin.set_setting("__wiz_custom_icon", "")
-
-
 def _reload_settings_after_wizard(ctrl):
     try:
         time.sleep(0.1)
@@ -297,7 +330,10 @@ def _reload_settings_after_wizard(ctrl):
 
 def _edit_subfragment_index(sc, sub_keys):
     if not sc or sc.get("type") != "open_settings":
-        return 0
+        try:
+            return _ctrl().getPluginSettingInt(__id__, "__wiz_subfragment", 0)
+        except Exception:
+            return 0
     value = sc.get("sub_fragment", "")
     try:
         return sub_keys.index(value) if value else 0
@@ -307,7 +343,10 @@ def _edit_subfragment_index(sc, sub_keys):
 
 def _edit_setting_index(sc, settings):
     if not sc or sc.get("type") != "operate_setting":
-        return 0
+        try:
+            return _ctrl().getPluginSettingInt(__id__, "__wiz_setting", 0)
+        except Exception:
+            return 0
     value = sc.get("setting_key", "")
     for index, setting in enumerate(settings):
         if setting.get("key") == value:
