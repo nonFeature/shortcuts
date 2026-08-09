@@ -22,7 +22,7 @@ LOCAL_UI_SETTINGS_NAMES = {"build_settings_list", "show_input_dialog", "show_sel
 SDK_UI_SETTINGS_NAMES = {"Divider", "Header", "Input", "Selector", "Switch", "Text"}
 SDK_UI_MODULES = {"ui.settings", "ui.bulletin"}
 
-COPYRIGHT_STRING = "# Shortcuts plugin for exteraGram / Ayugram\n# Plugin by @feature_plugins\n"
+COPYRIGHT_STRING = "# Shortcuts plugin for exteraGram / Ayugram\n# Plugin by @nonPlugins\n"
 
 HEADER_WATERMARK = """
 #          @@@@@@@@@@
