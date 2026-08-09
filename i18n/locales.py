@@ -78,6 +78,11 @@ STRINGS = {
         "icon_msg_media": "Data and storage",
         "icon_msg_autodelete": "Auto-delete",
         "add_deeplink_confirm": "Add shortcut from link?",
+        "plugin_not_installed": "Plugin is not installed",
+        "shortcut_exists": "Shortcut already exists. Update?",
+        "run_now": "Run now",
+        "update": "Update",
+        "invalid_deeplink": "Invalid shortcut link",
     },
     "ru": {
         "shortcuts": "Ярлыки",
@@ -156,6 +161,11 @@ STRINGS = {
         "icon_msg_media": "Данные и память",
         "icon_msg_autodelete": "Автоудаление",
         "add_deeplink_confirm": "Добавить этот ярлык по ссылке?",
+        "plugin_not_installed": "Плагин не установлен",
+        "shortcut_exists": "Ярлык уже существует. Обновить?",
+        "run_now": "Запустить",
+        "update": "Обновить",
+        "invalid_deeplink": "Некорректная ссылка на ярлык",
     },
 }
 
