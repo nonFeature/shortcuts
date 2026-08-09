@@ -25,7 +25,7 @@ def _init_new_wizard_state(plugin, pids):
     plugin.set_setting("__wiz_type", 0)
     plugin.set_setting("__wiz_subfragment", 0)
     plugin.set_setting("__wiz_setting", 0)
-    plugin.set_setting("__wiz_label", _plugin_name(selected_pid) if selected_pid else "")
+    plugin.set_setting("__wiz_label", str(_plugin_name(selected_pid) if selected_pid else "")[:50])
     plugin.set_setting("__wiz_icon", "media_settings")
     plugin.set_setting("__wiz_custom_icon", "")
 
@@ -46,7 +46,7 @@ def _init_edit_wizard_state(plugin, edit_index, pids):
         plugin.set_setting(f"__wiz_loc_{location_key}", location_key in locations)
     plugin.set_setting("__wiz_plugin", plugin_index)
     plugin.set_setting("__wiz_type", type_index)
-    plugin.set_setting("__wiz_label", str(sc.get("label", "") or ""))
+    plugin.set_setting("__wiz_label", str(sc.get("label", "") or "")[:50])
     plugin.set_setting("__wiz_icon", str(sc.get("icon", "media_settings") or "media_settings"))
     plugin.set_setting("__wiz_custom_icon", "")
 
@@ -188,7 +188,7 @@ def _on_plugin_change(plugin, value, pids):
         index = int(value)
         if 0 <= index < len(pids):
             pid = pids[index]
-            plugin.set_setting("__wiz_label", _plugin_name(pid))
+            plugin.set_setting("__wiz_label", str(_plugin_name(pid))[:50])
             _ctrl().loadPluginSettings(pid)
     except Exception as e:
         log(f"[{__id__}] plugin selection error: {e}")
@@ -204,7 +204,7 @@ def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=Non
         plug_i = 0
     pid = pids[plug_i]
     saved_label = _get_setting_string("__wiz_label")
-    def_label = saved_label if saved_label else _plugin_name(pid)
+    def_label = str(saved_label if saved_label else _plugin_name(pid))[:50]
 
     items.append(Input(key="__wiz_label", text=_s("custom_label"), default=def_label))
 
@@ -240,7 +240,7 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
                 run_on_ui_thread(lambda: BulletinHelper.show_error(_s("location_required")))
                 return
             plug_i = ctrl.getPluginSettingInt(__id__, "__wiz_plugin", 0)
-            custom_label = str(ctrl.getPluginSettingString(__id__, "__wiz_label", "") or "").strip()
+            custom_label = str(ctrl.getPluginSettingString(__id__, "__wiz_label", "") or "").strip()[:50]
 
             legacy_location = "both" if locations == ["drawer", "chat"] else locations[0]
             if plug_i < 0 or plug_i >= len(pids):

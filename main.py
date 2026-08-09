@@ -257,7 +257,7 @@ class ShortcutsPlugin(BasePlugin):
         self._menu_items = []
 
     def _register_menu(self, sc):
-        label = sc.get("label") or _sc_label(sc)
+        label = str(sc.get("label") or _sc_label(sc))[:50]
         icon = sc.get("icon") or "media_settings"
         menu_type_by_location = {
             "drawer": MenuItemType.DRAWER_MENU,

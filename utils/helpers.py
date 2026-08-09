@@ -151,14 +151,14 @@ def _shortcut_title(sc):
 
 def _sc_label(sc):
     if sc.get("label"):
-        return sc.get("label")
+        return str(sc.get("label"))[:50]
     pid = sc.get("plugin_id", "?")
     pname = _plugin_name(pid)
     t = sc.get("type", "toggle_plugin")
     if t == "toggle_plugin":
-        return f"Toggle: {pname}"
+        return f"Toggle: {pname}"[:50]
     elif t == "open_settings":
-        return f"{_s('settings')}: {pname}"
+        return f"{_s('settings')}: {pname}"[:50]
     elif t == "operate_setting":
-        return f"{pname}: {_shortcut_title(sc)}"
-    return pname
+        return f"{pname}: {_shortcut_title(sc)}"[:50]
+    return str(pname)[:50]

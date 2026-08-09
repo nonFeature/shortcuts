@@ -66,7 +66,7 @@ def _handle_deeplink(plugin, url_str):
             if stype not in ("toggle_plugin", "open_settings", "operate_setting"):
                 stype = "toggle_plugin"
 
-            label = str(uri.getQueryParameter("label") or "").strip()
+            label = str(uri.getQueryParameter("label") or "").strip()[:50]
             icon = str(uri.getQueryParameter("icon") or "media_settings").strip()
             locations_param = str(uri.getQueryParameter("locations") or "").strip()
             loc = str(uri.getQueryParameter("location") or "drawer").strip()
@@ -210,7 +210,7 @@ def _generate_deeplink(plugin, sc):
     try:
         stype = str(sc.get("type") or "toggle_plugin")
         pid = str(sc.get("plugin_id") or "")
-        lbl = str(sc.get("label") or "")
+        lbl = str(sc.get("label") or "")[:50]
         ic = str(sc.get("icon") or "media_settings")
         loc = str(sc.get("location") or "drawer")
 
