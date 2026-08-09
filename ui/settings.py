@@ -11,7 +11,7 @@ from header import __id__
 from i18n.locales import _s
 from ui.settings import Divider, Header, Switch, Text
 from ui.wizard import build_new_wizard, build_wizard_step1
-from utils.helpers import _ctrl, _dialog_context, _loc_label, _plugin_name, _sc_label, _show_dialog_safe
+from utils.helpers import _ctrl, _dialog_context, _plugin_name, _sc_label, _show_dialog_safe
 from utils.scanner import _trigger_setting_on_change
 
 
@@ -22,10 +22,11 @@ def build_settings_list(plugin):
     shortcuts = plugin._load_shortcuts()
     for i, sc in enumerate(shortcuts):
         label = _sc_label(sc)
-        loc_label = _loc_label(sc.get("location", "drawer"))
+        pid = sc.get("plugin_id", "")
+        display_text = f"{label} [{pid}]" if pid else label
         settings.append(
             Text(
-                text=f"{label} [{loc_label}]",
+                text=display_text,
                 icon=sc.get("icon") or "media_settings",
                 create_sub_fragment=lambda _i=i, _sc=sc: build_shortcut_actions(plugin, _i, _sc),
             )
