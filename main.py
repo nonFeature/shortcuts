@@ -6,6 +6,8 @@ from android_utils import run_on_ui_thread
 from base_plugin import BasePlugin, MenuItemData, MenuItemType
 from client_utils import get_last_fragment, log
 from com.exteragram.messenger.plugins.ui import PluginsActivity, PluginSettingsActivity
+from java import dynamic_proxy, jclass
+from org.telegram.messenger import NotificationCenter
 from ui.bulletin import BulletinHelper
 
 from features.deeplink import register_deeplink_hook
@@ -25,6 +27,21 @@ from utils.helpers import (
 )
 from utils.scanner import _collect_settings, _trigger_setting_on_change
 
+NotificationCenterDelegate = dynamic_proxy(jclass("org.telegram.messenger.NotificationCenter$NotificationCenterDelegate"))
+
+
+class _PluginsObserver(NotificationCenterDelegate):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def didReceivedNotification(self, nid, account, args):
+        try:
+            if nid == NotificationCenter.pluginsUpdated:
+                if bool(self.plugin.get_setting("auto_remove_missing", False)):
+                    self.plugin._cleanup_missing_shortcuts(restore_menus=True, notify=False)
+        except Exception as e:
+            log(f"[{__id__}] pluginsUpdated observer error: {e}")
+
 
 class ShortcutsPlugin(BasePlugin):
     def __init__(self):
@@ -32,6 +49,7 @@ class ShortcutsPlugin(BasePlugin):
         self._menu_items = []
         self._qa_mid = None
         self._deeplink_unhook = None
+        self._observer = None
 
     def on_plugin_load(self):
         try:
@@ -39,9 +57,32 @@ class ShortcutsPlugin(BasePlugin):
                 self._cleanup_missing_shortcuts(restore_menus=False, notify=False)
             self._restore_shortcuts()
             update_quick_access(self)
+            self._attach_observer()
             threading.Thread(target=self._register_deeplink_hook_async, daemon=True).start()
         except Exception as e:
             log(f"[{__id__}] on_plugin_load: {e}")
+
+    def _attach_observer(self):
+        def _do():
+            try:
+                if self._observer is None:
+                    self._observer = _PluginsObserver(self)
+                    NotificationCenter.getGlobalInstance().addObserver(self._observer, NotificationCenter.pluginsUpdated)
+            except Exception as e:
+                log(f"[{__id__}] attach observer: {e}")
+
+        run_on_ui_thread(_do)
+
+    def _detach_observer(self):
+        def _do():
+            try:
+                if self._observer is not None:
+                    NotificationCenter.getGlobalInstance().removeObserver(self._observer, NotificationCenter.pluginsUpdated)
+                    self._observer = None
+            except Exception as e:
+                log(f"[{__id__}] detach observer: {e}")
+
+        run_on_ui_thread(_do)
 
     def _register_deeplink_hook_async(self):
         try:
@@ -50,6 +91,7 @@ class ShortcutsPlugin(BasePlugin):
             log(f"[{__id__}] async deeplink hook: {e}")
 
     def on_plugin_unload(self):
+        self._detach_observer()
         self._clear_menu_items()
         _remove_menu_item_safe(self, self._qa_mid)
         self._qa_mid = None
@@ -108,8 +150,6 @@ class ShortcutsPlugin(BasePlugin):
         pid = sc.get("plugin_id", "")
 
         if not _plugin_exists(pid):
-            if bool(self.get_setting("auto_remove_missing", False)):
-                self._cleanup_missing_shortcuts(restore_menus=True, notify=False)
             run_on_ui_thread(lambda: BulletinHelper.show_error(f"{pid}: {_s('plugin_not_found')}"))
             return
 
@@ -125,6 +165,19 @@ class ShortcutsPlugin(BasePlugin):
         elif t == "operate_setting":
             st = sc.get("setting_type", "switch")
             vk = _setting_value_key(sc)
+
+            setting_found = False
+            try:
+                for setting in _collect_settings(pid):
+                    if _setting_value_key(setting) == vk:
+                        setting_found = True
+                        break
+            except Exception as e:
+                log(f"[{__id__}] check setting exists {pid}: {e}")
+
+            if not setting_found:
+                run_on_ui_thread(lambda: BulletinHelper.show_error(_s("setting_not_found")))
+                return
 
             if st == "switch":
                 try:
