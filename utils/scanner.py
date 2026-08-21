@@ -279,3 +279,54 @@ def _trigger_setting_on_change(pid, sc, value):
         _run_on_plugins_queue(_call)
     except Exception as e:
         log(f"[{__id__}] trigger on_change: {e}")
+
+
+def _find_sub_fragment_item(pid, sub_key):
+    visited_paths = set()
+    max_depth = 6
+
+    def _walk(definitions, pf, depth):
+        if definitions is None or depth > max_depth:
+            return None
+        for idx, it in enumerate(_to_py_list(definitions)):
+            try:
+                itype = getattr(it, "type", None)
+                if itype != "text":
+                    continue
+                cb = getattr(it, "createSubFragmentCallback", None)
+                if not cb:
+                    continue
+                key = getattr(it, "key", None)
+                alias = getattr(it, "linkAlias", None)
+                raw_text = getattr(it, "text", getattr(it, "hint", str(key or "")))
+                branch = alias or key or f"sub_{depth}_{idx}_{_shortcut_norm_text(raw_text or '') or 'item'}"
+                subprefix = branch if not pf else f"{pf}:{branch}"
+
+                if subprefix == sub_key:
+                    return it
+
+                if subprefix in visited_paths:
+                    continue
+                visited_paths.add(subprefix)
+                py = _invoke_sub_fragment_callback(cb)
+                nested_src = py.asList() if hasattr(py, "asList") else py
+                eng = PluginsController.engines.get("python")
+                nested = None
+                if eng:
+                    try:
+                        nested = eng.parsePySettingDefinitions(nested_src)
+                    except Exception:
+                        nested = None
+                if nested is None:
+                    nested = nested_src
+                res = _walk(nested, subprefix, depth + 1)
+                if res:
+                    return res
+            except Exception:
+                pass
+        return None
+
+    try:
+        return _walk(_get_settings_list(pid, ensure_loaded=True), "", 0)
+    except Exception:
+        return None

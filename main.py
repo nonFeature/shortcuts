@@ -6,12 +6,9 @@ from android_utils import run_on_ui_thread
 from base_plugin import BasePlugin, MenuItemData, MenuItemType
 from client_utils import get_last_fragment, log
 from com.exteragram.messenger.plugins.ui import PluginsActivity, PluginSettingsActivity
-from java import dynamic_proxy, jclass
-from org.telegram.messenger import NotificationCenter
 from ui.bulletin import BulletinHelper
 
 from features.deeplink import register_deeplink_hook
-from features.quick_access import update_quick_access
 from header import __id__
 from i18n.locales import _s
 from ui.settings import Divider, Header, build_settings_list, show_input_dialog, show_selector_dialog
@@ -25,22 +22,7 @@ from utils.helpers import (
     _setting_value_key,
     _shortcut_title,
 )
-from utils.scanner import _collect_settings, _trigger_setting_on_change
-
-NotificationCenterDelegate = dynamic_proxy(jclass("org.telegram.messenger.NotificationCenter$NotificationCenterDelegate"))
-
-
-class _PluginsObserver(NotificationCenterDelegate):
-    def __init__(self, plugin):
-        self.plugin = plugin
-
-    def didReceivedNotification(self, nid, account, args):
-        try:
-            if nid == NotificationCenter.pluginsUpdated:
-                if bool(self.plugin.get_setting("auto_remove_missing", False)):
-                    self.plugin._cleanup_missing_shortcuts(restore_menus=True, notify=False)
-        except Exception as e:
-            log(f"[{__id__}] pluginsUpdated observer error: {e}")
+from utils.scanner import _collect_settings, _find_sub_fragment_item, _trigger_setting_on_change
 
 
 class ShortcutsPlugin(BasePlugin):
@@ -49,40 +31,13 @@ class ShortcutsPlugin(BasePlugin):
         self._menu_items = []
         self._qa_mid = None
         self._deeplink_unhook = None
-        self._observer = None
 
     def on_plugin_load(self):
         try:
-            if bool(self.get_setting("auto_remove_missing", False)):
-                self._cleanup_missing_shortcuts(restore_menus=False, notify=False)
             self._restore_shortcuts()
-            update_quick_access(self)
-            self._attach_observer()
             threading.Thread(target=self._register_deeplink_hook_async, daemon=True).start()
         except Exception as e:
             log(f"[{__id__}] on_plugin_load: {e}")
-
-    def _attach_observer(self):
-        def _do():
-            try:
-                if self._observer is None:
-                    self._observer = _PluginsObserver(self)
-                    NotificationCenter.getGlobalInstance().addObserver(self._observer, NotificationCenter.pluginsUpdated)
-            except Exception as e:
-                log(f"[{__id__}] attach observer: {e}")
-
-        run_on_ui_thread(_do)
-
-    def _detach_observer(self):
-        def _do():
-            try:
-                if self._observer is not None:
-                    NotificationCenter.getGlobalInstance().removeObserver(self._observer, NotificationCenter.pluginsUpdated)
-                    self._observer = None
-            except Exception as e:
-                log(f"[{__id__}] detach observer: {e}")
-
-        run_on_ui_thread(_do)
 
     def _register_deeplink_hook_async(self):
         try:
@@ -91,7 +46,6 @@ class ShortcutsPlugin(BasePlugin):
             log(f"[{__id__}] async deeplink hook: {e}")
 
     def on_plugin_unload(self):
-        self._detach_observer()
         self._clear_menu_items()
         _remove_menu_item_safe(self, self._qa_mid)
         self._qa_mid = None
@@ -113,23 +67,6 @@ class ShortcutsPlugin(BasePlugin):
         except Exception as e:
             log(f"[{__id__}] create_settings: {e}\n{traceback.format_exc()}")
             return [Header(text=_s("shortcuts")), Divider(text=str(e))]
-
-    def _on_auto_remove_missing_toggle(self, enabled):
-        if enabled:
-            self._cleanup_missing_shortcuts(restore_menus=True, notify=True)
-
-    def _cleanup_missing_shortcuts(self, restore_menus=True, notify=False):
-        sc_list = self._load_shortcuts()
-        filtered = [sc for sc in sc_list if _plugin_exists(sc.get("plugin_id", ""))]
-        removed = len(sc_list) - len(filtered)
-        if removed <= 0:
-            return 0
-        self._save_shortcuts(filtered)
-        if restore_menus:
-            self._restore_shortcuts()
-        if notify:
-            run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s('missing_shortcuts_removed')}: {removed}"))
-        return removed
 
     def _open_self_settings(self):
         def _do():
@@ -242,6 +179,16 @@ class ShortcutsPlugin(BasePlugin):
 
                 eng = ctrl.getPluginEngine(pid)
                 if sub_fragment:
+                    try:
+                        item = _find_sub_fragment_item(pid, sub_fragment)
+                        if item and getattr(item, "createSubFragmentCallback", None):
+                            cb = item.createSubFragmentCallback
+                            title = getattr(item, "text", "") or ""
+                            frag.presentFragment(PluginSettingsActivity(plugin, str(title), None, cb))
+                            return
+                    except Exception as e:
+                        log(f"[{__id__}] open_settings sub_fragment find {pid}: {e}")
+
                     if eng:
                         try:
                             eng.openPluginSetting(pid, sub_fragment, frag)
@@ -276,11 +223,14 @@ class ShortcutsPlugin(BasePlugin):
                 legacy_items = raw.get("shortcuts")
                 raw = legacy_items if isinstance(legacy_items, list) else []
         if not isinstance(raw, list):
-            return []
+            raw = []
         normalized = []
+        has_system = False
         for sc in raw:
             if not isinstance(sc, dict):
                 continue
+            if sc.get("is_system"):
+                has_system = True
             if sc.get("type") == "operate_setting" and isinstance(sc.get("setting"), dict):
                 ref = sc.get("setting") or {}
                 merged = dict(sc)
@@ -291,6 +241,20 @@ class ShortcutsPlugin(BasePlugin):
                 normalized.append(merged)
                 continue
             normalized.append(sc)
+
+        if not has_system:
+            system_sc = {
+                "type": "open_settings",
+                "plugin_id": __id__,
+                "location": "drawer",
+                "locations": ["drawer"],
+                "label": _s("shortcuts"),
+                "icon": "media_settings",
+                "is_system": True,
+            }
+            normalized.insert(0, system_sc)
+            self._save_shortcuts(normalized)
+
         return normalized
 
     def _save_shortcuts(self, sc_list):
@@ -327,6 +291,8 @@ class ShortcutsPlugin(BasePlugin):
     def _remove_shortcut(self, idx):
         sc_list = self._load_shortcuts()
         if 0 <= idx < len(sc_list):
+            if sc_list[idx].get("is_system"):
+                return
             sc_list.pop(idx)
             self._save_shortcuts(sc_list)
             self._restore_shortcuts()

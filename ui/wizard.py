@@ -105,6 +105,12 @@ def _render_wizard(plugin, pids, edit_index=None):
             )
         ]
         items.append(Divider(text=_s("location_hint")))
+
+        if editing_sc and editing_sc.get("is_system"):
+            items.append(Divider())
+            items.extend(build_wizard_step_customize(plugin, pids, editing_sc.get("type"), edit_index=edit_index))
+            return items
+
         if not pids:
             return [*items, Divider(text=_s("no_plugins"))]
 
@@ -236,13 +242,19 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
         try:
             ctrl = _ctrl()
             locations = [key for key in LOCATION_KEYS if ctrl.getPluginSettingBoolean(__id__, f"__wiz_loc_{key}", False)]
-            if not locations:
+
+            sc_list = plugin._load_shortcuts()
+            is_sys = False
+            if edit_index is not None and 0 <= edit_index < len(sc_list):
+                is_sys = bool(sc_list[edit_index].get("is_system"))
+
+            if not locations and not is_sys:
                 run_on_ui_thread(lambda: BulletinHelper.show_error(_s("location_required")))
                 return
             plug_i = ctrl.getPluginSettingInt(__id__, "__wiz_plugin", 0)
             custom_label = str(ctrl.getPluginSettingString(__id__, "__wiz_label", "") or "").strip()[:50]
 
-            legacy_location = "both" if locations == ["drawer", "chat"] else locations[0]
+            legacy_location = "both" if locations == ["drawer", "chat"] else (locations[0] if locations else "")
             if plug_i < 0 or plug_i >= len(pids):
                 plug_i = 0
             pid = pids[plug_i]
@@ -252,12 +264,16 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
                 run_on_ui_thread(lambda: BulletinHelper.show_error(_s("icon_not_found")))
                 return
 
-            sc_list = plugin._load_shortcuts()
             if edit_index is not None and 0 <= edit_index < len(sc_list):
                 sc = dict(sc_list[edit_index])
                 for key in ("sub_fragment", "setting_key", "setting_value_key", "setting_open_key", "setting_type", "setting_items"):
                     sc.pop(key, None)
-                sc.update({"type": stype, "plugin_id": pid, "location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key})
+
+                if sc.get("is_system"):
+                    # Preserve original type and pid for system shortcuts
+                    sc.update({"location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key})
+                else:
+                    sc.update({"type": stype, "plugin_id": pid, "location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key})
             else:
                 sc = {"type": stype, "plugin_id": pid, "location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key}
 

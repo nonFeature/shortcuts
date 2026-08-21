@@ -1,6 +1,6 @@
 __name__ = "Shortcuts"
 __description__ = "Создает ярлыки на все плагины и практически весь их функционал"
-__version__ = "1.3"
+__version__ = "1.3.1"
 __id__ = "shortcuts"
 __author__ = "@nonPlugins"
 __icon__ = "feature_plugins/3"

@@ -6,10 +6,9 @@ from java import dynamic_proxy, jclass
 from ui.bulletin import BulletinHelper
 
 from features.deeplink import copy_deeplink
-from features.quick_access import update_quick_access
 from header import __id__
 from i18n.locales import _s
-from ui.settings import Divider, Header, Switch, Text
+from ui.settings import Divider, Text
 from ui.wizard import build_new_wizard, build_wizard_step1
 from utils.helpers import _ctrl, _dialog_context, _plugin_name, _sc_label, _show_dialog_safe
 from utils.scanner import _trigger_setting_on_change
@@ -17,43 +16,36 @@ from utils.scanner import _trigger_setting_on_change
 
 def build_settings_list(plugin):
     settings = []
-    settings.append(Header(text=_s("shortcuts")))
 
     shortcuts = plugin._load_shortcuts()
     for i, sc in enumerate(shortcuts):
         label = _sc_label(sc)
         pid = sc.get("plugin_id", "")
         display_text = f"{label} [{pid}]" if pid else label
-        settings.append(
-            Text(
-                text=display_text,
-                icon=sc.get("icon") or "media_settings",
-                create_sub_fragment=lambda _i=i, _sc=sc: build_shortcut_actions(plugin, _i, _sc),
+        if sc.get("is_system"):
+            settings.append(
+                Text(
+                    text=display_text,
+                    icon=sc.get("icon") or "media_settings",
+                    create_sub_fragment=build_wizard_step1(plugin, edit_index=i),
+                )
             )
-        )
-        settings.append(Divider())
-
+            settings.append(Divider())
+        else:
+            settings.append(
+                Text(
+                    text=display_text,
+                    icon=sc.get("icon") or "media_settings",
+                    create_sub_fragment=lambda _i=i, _sc=sc: build_shortcut_actions(plugin, _i, _sc),
+                )
+            )
     settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=build_new_wizard(plugin)))
 
-    settings.append(Header(text=_s("actions")))
-    settings.append(
-        Switch(key="quick_access", text=_s("quick_access"), subtext=_s("quick_access_sub"), default=False, on_change=lambda v: update_quick_access(plugin, v))
-    )
-    settings.append(
-        Switch(
-            key="auto_remove_missing",
-            text=_s("auto_remove_missing"),
-            subtext=_s("auto_remove_missing_sub"),
-            default=False,
-            on_change=lambda v: plugin._on_auto_remove_missing_toggle(v),
-        )
-    )
-    settings.append(Divider())
     return settings
 
 
 def build_shortcut_actions(plugin, index, sc):
-    return [
+    actions = [
         Text(text=_s("open_shortcut"), icon="msg_share", on_click=lambda _value: plugin._exec_shortcut(sc)),
         Text(
             text=_s("edit_shortcut"),
@@ -61,8 +53,10 @@ def build_shortcut_actions(plugin, index, sc):
             create_sub_fragment=build_wizard_step1(plugin, edit_index=index),
         ),
         Text(text=_s("copy_deeplink"), icon="msg_copy", on_click=lambda _value: copy_deeplink(plugin, sc)),
-        Text(text=_s("remove_shortcut"), icon="msg_delete", red=True, on_click=lambda _value: plugin._remove_shortcut(index)),
     ]
+    if not sc.get("is_system"):
+        actions.append(Text(text=_s("remove_shortcut"), icon="msg_delete", red=True, on_click=lambda _value: plugin._remove_shortcut(index)))
+    return actions
 
 
 def show_selector_dialog(plugin, pid, key, title, items, sc=None):
