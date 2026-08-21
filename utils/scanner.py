@@ -69,6 +69,9 @@ def _has_settings_reliably(pid):
 
 def _collect_sub_fragments(pid, ensure_loaded=True):
     out = []
+    if pid == __id__:
+        return out
+
     try:
         lst = _get_settings_list(pid, ensure_loaded=ensure_loaded)
     except Exception:
@@ -134,6 +137,9 @@ def _collect_sub_fragments(pid, ensure_loaded=True):
 
 def _collect_settings(pid, prefix=None, ensure_loaded=True):
     out = []
+    if pid == __id__:
+        return out
+
     try:
         lst = _get_settings_list(pid, ensure_loaded=ensure_loaded)
     except Exception:
