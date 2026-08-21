@@ -54,35 +54,31 @@ def _init_edit_wizard_state(plugin, edit_index, pids):
 WIZ_SESSION = ""
 
 
-def _is_reloading():
-    try:
-        from java import jclass
-
-        Thread = jclass("java.lang.Thread")
-        stack = str([str(x) for x in Thread.currentThread().getStackTrace()])
-        return "didReceivedNotification" in stack or "update" in stack.lower()
-    except Exception:
-        return False
-
-
 def build_new_wizard(plugin):
+    initialized = False
+
     def _render():
+        nonlocal initialized
         pids = _plugin_ids()
-        if not _is_reloading():
+        if not initialized:
             global WIZ_SESSION
             import time
 
             WIZ_SESSION = str(int(time.time() * 1000))
             _init_new_wizard_state(plugin, pids)
+            initialized = True
         return _render_wizard(plugin, pids, edit_index=None)
 
     return _render
 
 
 def build_wizard_step1(plugin, edit_index=None):
+    initialized = False
+
     def _render():
+        nonlocal initialized
         pids = _plugin_ids()
-        if not _is_reloading():
+        if not initialized:
             global WIZ_SESSION
             import time
 
@@ -91,6 +87,7 @@ def build_wizard_step1(plugin, edit_index=None):
                 _init_edit_wizard_state(plugin, edit_index, pids)
             else:
                 _init_new_wizard_state(plugin, pids)
+            initialized = True
         return _render_wizard(plugin, pids, edit_index=edit_index)
 
     return _render
@@ -205,8 +202,14 @@ def _render_wizard(plugin, pids, edit_index=None):
     try:
         return _build()
     except Exception as e:
-        log(f"[{__id__}] build_wizard_step1 error: {e}\n{traceback.format_exc()}")
-        return [Header(text=_s("add_shortcut")), Divider(text=f"{_s('error')}: {e}")]
+        err_msg = f"{e}\n{traceback.format_exc()}"
+        log(f"[{__id__}] build_wizard_step1 error: {err_msg}")
+        try:
+            with open(r"d:\.proj\plagins\projects\shortcuts\scratch_error.txt", "w") as f:
+                f.write(err_msg)
+        except Exception:
+            pass
+        return [Header(text=_s("add_shortcut")), Divider(text=f"{_s('error')}: {e!s}")]
 
 
 def _on_plugin_change(plugin, value, pids):
@@ -344,9 +347,15 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
             run_on_ui_thread(lambda: _finish_wizard_fragment(wizard_fragment))
             threading.Thread(target=lambda: _reload_settings_after_wizard(ctrl), daemon=True).start()
         except Exception as e:
-            log(f"[{__id__}] wizard_finalize error: {e}\n{traceback.format_exc()}")
-            err_msg = str(e)
-            run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
+            err_msg = f"{e}\n{traceback.format_exc()}"
+            log(f"[{__id__}] wizard_finalize error: {err_msg}")
+            try:
+                with open(r"d:\.proj\plagins\projects\shortcuts\scratch_error.txt", "w") as f:
+                    f.write(err_msg)
+            except Exception:
+                pass
+            err_str = str(e)
+            run_on_ui_thread(lambda err=err_str: BulletinHelper.show_error(err))
 
     threading.Thread(target=_do, daemon=True).start()
 
@@ -369,7 +378,7 @@ def _get_setting_string(key, default=""):
 
 def _reload_settings_after_wizard(ctrl):
     try:
-        time.sleep(0.1)
+        time.sleep(0.4)
         ctrl.loadPluginSettings(__id__)
     except Exception as e:
         log(f"[{__id__}] reload after wizard: {e}")
