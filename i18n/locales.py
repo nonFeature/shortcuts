@@ -2,6 +2,7 @@ from java.util import Locale
 
 STRINGS = {
     "en": {
+        "shortcuts": "Shortcuts",
         "plugins": "Plugins",
         "no_plugins": "No other plugins found",
         "settings": "Settings",
@@ -21,7 +22,7 @@ STRINGS = {
         "type": "Action type",
         "toggle_plugin": "Toggle on/off",
         "open_settings": "Open settings page",
-        "operate_setting": "Change setting value",
+        "operate_setting": "Interact with setting",
         "create": "Create",
         "shortcut_created": "Shortcut created",
         "shortcut_updated": "Shortcut updated",
@@ -73,6 +74,7 @@ STRINGS = {
         "invalid_deeplink": "Invalid shortcut link",
     },
     "ru": {
+        "shortcuts": "Ярлыки",
         "plugins": "Плагины",
         "no_plugins": "Других плагинов пока нет",
         "settings": "Настройки",
@@ -92,7 +94,7 @@ STRINGS = {
         "type": "Что делать",
         "toggle_plugin": "Включить/выключить плагин",
         "open_settings": "Открыть экран настроек",
-        "operate_setting": "Переключить настройку",
+        "operate_setting": "Взаимодействовать с настройкой",
         "create": "Создать",
         "shortcut_created": "Ярлык создан",
         "shortcut_updated": "Ярлык обновлён",
@@ -148,7 +150,15 @@ STRINGS = {
 
 def _is_ru():
     try:
-        return Locale.getDefault().getLanguage() == "ru"
+        from org.telegram.messenger import LocaleController
+
+        curr = LocaleController.getInstance().getCurrentLocale()
+        if curr and curr.getLanguage():
+            return curr.getLanguage().lower().startswith("ru")
+    except Exception:
+        pass
+    try:
+        return Locale.getDefault().getLanguage().lower().startswith("ru")
     except Exception:
         return True
 

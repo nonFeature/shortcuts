@@ -10,7 +10,17 @@ from ui.bulletin import BulletinHelper
 
 from header import __id__
 from i18n.locales import _s
-from utils.helpers import _ctrl, _dialog_context, _loc_label, _plugin_exists, _plugin_name, _sc_label, _show_dialog_safe
+from utils.helpers import (
+    _ctrl,
+    _dialog_context,
+    _loc_label,
+    _plugin_exists,
+    _plugin_name,
+    _sc_label,
+    _show_bulletin_error,
+    _show_bulletin_success,
+    _show_dialog_safe,
+)
 
 
 def register_deeplink_hook(plugin):
@@ -83,6 +93,7 @@ def _handle_deeplink(plugin, url_str):
                 valid_locations = [loc_item for loc_item in locations if loc_item in ("drawer", "chat", "message", "profile")]
                 if valid_locations:
                     sc["locations"] = valid_locations
+                    sc["location"] = valid_locations[0]
 
             if stype == "open_settings":
                 sub_fragment = str(uri.getQueryParameter("sub_fragment") or "").strip()
@@ -177,7 +188,7 @@ def _handle_deeplink(plugin, url_str):
                         msg_key = "shortcut_created"
                     plugin._save_shortcuts(shortcuts)
                     plugin._restore_shortcuts()
-                    run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s(msg_key)}: {dis_label}"))
+                    _show_bulletin_success(f"{_s(msg_key)}: {dis_label}")
                     try:
                         _ctrl().loadPluginSettings(__id__)
                     except Exception:
@@ -200,8 +211,7 @@ def _handle_deeplink(plugin, url_str):
             _show_dialog_safe(frag, dialog)
         except Exception as e:
             log(f"[{__id__}] handle_deeplink error: {e}")
-            err_msg = str(e)
-            run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
+            _show_bulletin_error(str(e))
 
     run_on_ui_thread(_do)
 
@@ -259,15 +269,20 @@ def _generate_deeplink(plugin, sc):
 
 def copy_deeplink(plugin, sc):
     try:
+        if isinstance(sc, int):
+            shortcuts = plugin._load_shortcuts()
+            if 0 <= sc < len(shortcuts):
+                sc = shortcuts[sc]
+            else:
+                sc = {}
         link = _generate_deeplink(plugin, sc)
         if not link:
-            run_on_ui_thread(lambda: BulletinHelper.show_error(_s("error")))
+            _show_bulletin_error(_s("error"))
             return
 
         AndroidUtilities.addToClipboard(link)
         msg = _s("deeplink_copied")
-        run_on_ui_thread(lambda: BulletinHelper.show_success(msg))
+        _show_bulletin_success(msg)
     except Exception as e:
         log(f"[{__id__}] copy_deeplink error: {e}")
-        err_msg = str(e)
-        run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
+        _show_bulletin_error(str(e))

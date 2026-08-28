@@ -6,7 +6,7 @@ from android_utils import run_on_ui_thread
 from base_plugin import BasePlugin, MenuItemData, MenuItemType
 from client_utils import get_last_fragment, log
 from com.exteragram.messenger.plugins.ui import PluginsActivity, PluginSettingsActivity
-from ui.bulletin import BulletinHelper
+from org.telegram.messenger import ApplicationLoader
 
 from features.deeplink import register_deeplink_hook
 from header import __id__
@@ -14,6 +14,7 @@ from i18n.locales import _s
 from ui.settings import Divider, Header, build_settings_list, show_input_dialog, show_selector_dialog
 from utils.helpers import (
     _ctrl,
+    _finish_and_show_success,
     _plugin_exists,
     _plugin_name,
     _remove_menu_item_safe,
@@ -21,23 +22,180 @@ from utils.helpers import (
     _sc_locations,
     _setting_value_key,
     _shortcut_title,
+    _show_bulletin_error,
+    _show_bulletin_info,
+    _show_bulletin_success,
 )
-from utils.scanner import _collect_settings, _find_sub_fragment_item, _trigger_setting_on_change
+from utils.scanner import (
+    _collect_settings,
+    _find_setting_item,
+    _find_sub_fragment_item,
+    _get_item_cb,
+    _get_item_click_cb,
+    _get_item_text,
+    _invoke_click_callback,
+    _trigger_setting_on_change,
+)
+
+
+def _clean_corrupted_preferences():
+    try:
+        context = ApplicationLoader.applicationContext
+        if not context:
+            return
+        pref_names = [
+            f"plugin_{__id__}",
+            f"plugins_{__id__}",
+            f"{__id__}_settings",
+            "plugins_settings",
+            __id__,
+        ]
+        for name in pref_names:
+            try:
+                sp = context.getSharedPreferences(name, 0)
+                if sp:
+                    all_entries = sp.getAll()
+                    if all_entries:
+                        editor = sp.edit()
+                        has_changes = False
+                        for k in all_entries.keySet().toArray():
+                            key_str = str(k)
+                            val = all_entries.get(k)
+                            if val is None or key_str.startswith("__wiz_"):
+                                editor.remove(key_str)
+                                has_changes = True
+                        if has_changes:
+                            editor.commit()
+            except Exception as e:
+                log(f"[{__id__}] clean pref {name}: {e}")
+    except Exception as e:
+        log(f"[{__id__}] _clean_corrupted_preferences: {e}")
+
+
+try:
+    _clean_corrupted_preferences()
+except Exception:
+    pass
+
+
+class SafeSettingsDict(dict):
+    def __setitem__(self, key, value):
+        if value is None:
+            if key in self:
+                super().__delitem__(key)
+            return
+        super().__setitem__(str(key), value)
+
+    def __getitem__(self, key):
+        val = super().get(str(key), None)
+        return val if val is not None else ""
+
+    def get(self, key, default=""):
+        val = super().get(str(key), None)
+        if val is not None:
+            return val
+        return default if default is not None else ""
+
+    def items(self):
+        return [(k, v) for k, v in super().items() if k is not None and v is not None and not str(k).startswith("__wiz_")]
+
+    def values(self):
+        return [v for k, v in super().items() if k is not None and v is not None and not str(k).startswith("__wiz_")]
+
+    def keys(self):
+        return [k for k, v in super().items() if k is not None and v is not None and not str(k).startswith("__wiz_")]
 
 
 class ShortcutsPlugin(BasePlugin):
     def __init__(self):
+        self._safe_settings_data = SafeSettingsDict()
         super().__init__()
         self._menu_items = []
         self._qa_mid = None
         self._deeplink_unhook = None
+        self._sanitize_settings()
+
+    @property
+    def settings(self):
+        if not hasattr(self, "_safe_settings_data"):
+            self._safe_settings_data = SafeSettingsDict()
+        return self._safe_settings_data
+
+    @settings.setter
+    def settings(self, value):
+        if not hasattr(self, "_safe_settings_data"):
+            self._safe_settings_data = SafeSettingsDict()
+        self._safe_settings_data.clear()
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if k is not None and v is not None and not str(k).startswith("__wiz_"):
+                    self._safe_settings_data[str(k)] = v
+
+    @property
+    def _settings(self):
+        return self.settings
+
+    @_settings.setter
+    def _settings(self, value):
+        self.settings = value
 
     def on_plugin_load(self):
         try:
+            self._sanitize_settings()
             self._restore_shortcuts()
             threading.Thread(target=self._register_deeplink_hook_async, daemon=True).start()
         except Exception as e:
             log(f"[{__id__}] on_plugin_load: {e}")
+
+    def _sanitize_settings(self):
+        try:
+            _clean_corrupted_preferences()
+            if hasattr(self, "_safe_settings_data") and isinstance(self._safe_settings_data, dict):
+                for k in list(self._safe_settings_data.keys()):
+                    if self._safe_settings_data[k] is None or str(k).startswith("__wiz_"):
+                        del self._safe_settings_data[k]
+        except Exception as e:
+            log(f"[{__id__}] _sanitize_settings error: {e}")
+
+    def get_setting(self, key, default=""):
+        val = self.settings.get(key, None)
+        if val is not None and val != "":
+            return val
+        try:
+            val = super().get_setting(key, default)
+            if val is not None:
+                self.settings[str(key)] = val
+                return val
+        except Exception:
+            pass
+        return default if default is not None else ""
+
+    def set_setting(self, key, value, reload_settings=False):
+        if value is None:
+            if key in self.settings:
+                del self.settings[key]
+            return
+        self.settings[str(key)] = value
+        try:
+            super().set_setting(key, value)
+        except Exception as e:
+            log(f"[{__id__}] super().set_setting error: {e}")
+
+    def getAllSettings(self):
+        self._sanitize_settings()
+        return dict(self.settings.items())
+
+    def get_all_settings(self):
+        return self.getAllSettings()
+
+    def getSettings(self):
+        return self.getAllSettings()
+
+    def get_settings(self):
+        return self.getAllSettings()
+
+    def getPluginSettings(self):
+        return self.getAllSettings()
 
     def _register_deeplink_hook_async(self):
         try:
@@ -63,6 +221,7 @@ class ShortcutsPlugin(BasePlugin):
 
     def create_settings(self):
         try:
+            self._sanitize_settings()
             return build_settings_list(self)
         except Exception as e:
             log(f"[{__id__}] create_settings: {e}\n{traceback.format_exc()}")
@@ -87,7 +246,7 @@ class ShortcutsPlugin(BasePlugin):
         pid = sc.get("plugin_id", "")
 
         if not _plugin_exists(pid):
-            run_on_ui_thread(lambda: BulletinHelper.show_error(f"{pid}: {_s('plugin_not_found')}"))
+            _show_bulletin_error(f"{pid}: {_s('plugin_not_found')}")
             return
 
         if t == "toggle_plugin":
@@ -100,57 +259,76 @@ class ShortcutsPlugin(BasePlugin):
             self._open_settings_or_subfragment(pid, sub_fragment=sub)
 
         elif t == "operate_setting":
-            st = sc.get("setting_type", "switch")
-            vk = _setting_value_key(sc)
 
-            setting_found = False
-            try:
-                for setting in _collect_settings(pid):
-                    if _setting_value_key(setting) == vk:
-                        setting_found = True
-                        break
-            except Exception as e:
-                log(f"[{__id__}] check setting exists {pid}: {e}")
-
-            if not setting_found:
-                run_on_ui_thread(lambda: BulletinHelper.show_error(_s("setting_not_found")))
-                return
-
-            if st == "switch":
+            def _do_operate():
                 try:
-                    cur = _ctrl().getPluginSettingBoolean(pid, vk, False)
-                except Exception:
-                    cur = False
-                value = not bool(cur)
-                _ctrl().setPluginSetting(pid, vk, value)
-                _trigger_setting_on_change(pid, sc, value)
-                run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_plugin_name(pid)}: {('ON' if value else 'OFF')}"))
-            elif st == "selector":
-                opts = sc.get("setting_items") or sc.get("items") or []
-                if not opts:
+                    st = sc.get("setting_type", "switch")
+                    vk = _setting_value_key(sc)
+
+                    setting_found = False
                     try:
-                        for setting in _collect_settings(pid):
+                        for setting in _collect_settings(pid, ensure_loaded=True):
                             if _setting_value_key(setting) == vk:
-                                opts = setting.get("items") or []
+                                setting_found = True
                                 break
                     except Exception as e:
-                        log(f"[{__id__}] selector items fallback: {e}")
-                show_selector_dialog(self, pid, vk, _shortcut_title(sc), opts, sc)
-            elif st == "input":
-                show_input_dialog(self, pid, vk, _shortcut_title(sc), sc)
+                        log(f"[{__id__}] check setting exists {pid}: {e}")
+
+                    if not setting_found:
+                        _show_bulletin_error(_s("setting_not_found"))
+                        return
+
+                    if st == "switch":
+                        try:
+                            cur = _ctrl().getPluginSettingBoolean(pid, vk, False)
+                        except Exception:
+                            cur = False
+                        value = not bool(cur)
+                        _ctrl().setPluginSetting(pid, vk, value)
+                        _trigger_setting_on_change(pid, sc, value)
+                        _show_bulletin_success(f"{_plugin_name(pid)}: {('ON' if value else 'OFF')}")
+                    elif st == "selector":
+                        opts = sc.get("setting_items") or sc.get("items") or []
+                        if not opts:
+                            try:
+                                for setting in _collect_settings(pid, ensure_loaded=False):
+                                    if _setting_value_key(setting) == vk:
+                                        opts = setting.get("items") or []
+                                        break
+                            except Exception as e:
+                                log(f"[{__id__}] selector items fallback: {e}")
+                        show_selector_dialog(self, pid, vk, _shortcut_title(sc), opts, sc)
+                    elif st == "input":
+                        show_input_dialog(self, pid, vk, _shortcut_title(sc), sc)
+                    elif st in ("button", "action"):
+                        item = _find_setting_item(pid, sc)
+                        click_cb = _get_item_click_cb(item) if item else None
+                        if click_cb is not None:
+
+                            def _run_click():
+                                try:
+                                    _invoke_click_callback(click_cb)
+                                except Exception as e:
+                                    log(f"[{__id__}] button click error {pid}:{vk}: {e}")
+
+                            run_on_ui_thread(_run_click)
+                            _show_bulletin_success(f"{_plugin_name(pid)}: {_sc_label(sc)}")
+                        else:
+                            _show_bulletin_error(_s("setting_not_found"))
+                except Exception as e:
+                    log(f"[{__id__}] operate_setting error: {e}")
+
+            threading.Thread(target=_do_operate, daemon=True).start()
 
     def _toggle(self, pid, pname, enabled):
         def _do():
             try:
                 _ctrl().setPluginEnabled(pid, enabled, None)
                 msg = f"{pname}: ON" if enabled else f"{pname}: OFF"
-                run_on_ui_thread(lambda: BulletinHelper.show_success(msg))
+                _show_bulletin_success(msg)
             except Exception as e:
                 log(f"[{__id__}] toggle {pid}: {e}")
-                err_msg = str(e)
-                run_on_ui_thread(lambda: BulletinHelper.show_error(err_msg))
-
-        import threading
+                _show_bulletin_error(str(e))
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -166,7 +344,7 @@ class ShortcutsPlugin(BasePlugin):
                 if not plugin:
                     return
                 if not plugin.isEnabled():
-                    run_on_ui_thread(lambda: BulletinHelper.show_info(f"{plugin.getName()}: {_s('plugin_disabled_open_manager')}"))
+                    _show_bulletin_info(f"{plugin.getName()}: {_s('plugin_disabled_open_manager')}")
                     try:
                         frag.presentFragment(PluginsActivity())
                     except Exception as e:
@@ -181,9 +359,9 @@ class ShortcutsPlugin(BasePlugin):
                 if sub_fragment:
                     try:
                         item = _find_sub_fragment_item(pid, sub_fragment)
-                        if item and getattr(item, "createSubFragmentCallback", None):
-                            cb = item.createSubFragmentCallback
-                            title = getattr(item, "text", "") or ""
+                        cb = _get_item_cb(item) if item else None
+                        title = _get_item_text(item) if item else ""
+                        if cb is not None:
                             frag.presentFragment(PluginSettingsActivity(plugin, str(title), None, cb))
                             return
                     except Exception as e:
@@ -231,6 +409,10 @@ class ShortcutsPlugin(BasePlugin):
                 continue
             if sc.get("is_system"):
                 has_system = True
+                label_val = str(sc.get("label", "") or "").strip()
+                if not label_val or label_val == "shortcuts":
+                    sc = dict(sc)
+                    sc["label"] = _s("shortcuts")
             if sc.get("type") == "operate_setting" and isinstance(sc.get("setting"), dict):
                 ref = sc.get("setting") or {}
                 merged = dict(sc)
@@ -262,9 +444,11 @@ class ShortcutsPlugin(BasePlugin):
 
     def _restore_shortcuts(self):
         self._clear_menu_items()
-        for sc in self._load_shortcuts():
+        shortcuts = self._load_shortcuts()
+        for i, sc in enumerate(shortcuts):
             try:
-                self._register_menu(sc)
+                priority = max(1, 100 - i)
+                self._register_menu(sc, priority=priority)
             except Exception as e:
                 log(f"[{__id__}] restore shortcut: {e}")
 
@@ -273,7 +457,7 @@ class ShortcutsPlugin(BasePlugin):
             _remove_menu_item_safe(self, mid)
         self._menu_items = []
 
-    def _register_menu(self, sc):
+    def _register_menu(self, sc, priority=10):
         label = str(sc.get("label") or _sc_label(sc))[:50]
         icon = sc.get("icon") or "media_settings"
         menu_type_by_location = {
@@ -284,7 +468,15 @@ class ShortcutsPlugin(BasePlugin):
         }
         menu_types = [menu_type_by_location[location] for location in _sc_locations(sc)]
         for mt in menu_types:
-            mid = self.add_menu_item(MenuItemData(menu_type=mt, text=label, icon=icon, priority=10, on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc)))
+            mid = self.add_menu_item(
+                MenuItemData(
+                    menu_type=mt,
+                    text=label,
+                    icon=icon,
+                    priority=priority,
+                    on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc),
+                )
+            )
             if mid:
                 self._menu_items.append(mid)
 
@@ -297,14 +489,5 @@ class ShortcutsPlugin(BasePlugin):
             self._save_shortcuts(sc_list)
             self._restore_shortcuts()
 
-            def _finish_action_fragment():
-                try:
-                    fragment = get_last_fragment()
-                    if fragment:
-                        fragment.finishFragment()
-                except Exception as e:
-                    log(f"[{__id__}] close removed shortcut fragment: {e}")
-
-            run_on_ui_thread(lambda: BulletinHelper.show_success(_s("shortcut_removed")))
-            run_on_ui_thread(_finish_action_fragment)
+            _finish_and_show_success(None, _s("shortcut_removed"))
             _ctrl().loadPluginSettings(__id__)

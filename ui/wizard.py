@@ -2,16 +2,23 @@ import threading
 import time
 import traceback
 
-from android_utils import run_on_ui_thread
 from client_utils import get_last_fragment, log
 from org.telegram.messenger import ApplicationLoader
-from ui.bulletin import BulletinHelper
 
 from data.constants import PRESET_ICONS
 from header import __id__
 from i18n.locales import _s
 from ui.settings import Divider, Header, Input, Selector, Switch, Text
-from utils.helpers import _ctrl, _plugin_name, _sc_label, _sc_locations, _setting_value_key
+from utils.helpers import (
+    _ctrl,
+    _finish_and_show_success,
+    _plugin_name,
+    _sc_label,
+    _sc_locations,
+    _setting_value_key,
+    _show_bulletin_error,
+    _show_bulletin_success,
+)
 from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settings_reliably, _plugin_ids
 
 LOCATION_KEYS = ("drawer", "chat", "message", "profile")
@@ -46,12 +53,66 @@ def _init_edit_wizard_state(plugin, edit_index, pids):
         plugin.set_setting(f"__wiz_loc_{location_key}_{WIZ_SESSION}", location_key in locations)
     plugin.set_setting(f"__wiz_plugin_{WIZ_SESSION}", plugin_index)
     plugin.set_setting(f"__wiz_type_{WIZ_SESSION}", type_index)
-    plugin.set_setting(f"__wiz_label_{WIZ_SESSION}", str(sc.get("label", "") or "")[:50])
+    raw_label = str(sc.get("label", "") or "").strip()
+    if not raw_label:
+        raw_label = _s("shortcuts") if sc.get("is_system") or pid == __id__ else _plugin_name(pid)
+    plugin.set_setting(f"__wiz_label_{WIZ_SESSION}", raw_label[:50])
     plugin.set_setting(f"__wiz_icon_{WIZ_SESSION}", str(sc.get("icon", "media_settings") or "media_settings"))
     plugin.set_setting(f"__wiz_custom_icon_{WIZ_SESSION}", "")
 
+    if sc.get("type") == "open_settings":
+        subs = _collect_sub_fragments(pid, ensure_loaded=False)
+        sub_keys = ["root"] + [s["key"] for s in subs]
+        plugin.set_setting(f"__wiz_subfragment_{WIZ_SESSION}", _edit_subfragment_index(sc, sub_keys))
+    else:
+        plugin.set_setting(f"__wiz_subfragment_{WIZ_SESSION}", 0)
+
+    if sc.get("type") == "operate_setting":
+        settings = _collect_settings(pid, ensure_loaded=False)
+        plugin.set_setting(f"__wiz_setting_{WIZ_SESSION}", _edit_setting_index(sc, settings))
+    else:
+        plugin.set_setting(f"__wiz_setting_{WIZ_SESSION}", 0)
+
 
 WIZ_SESSION = ""
+
+
+def _clean_wizard_cache(plugin, keep_session=None):
+    try:
+        context = ApplicationLoader.applicationContext
+        if context:
+            pref_names = [f"plugin_{__id__}", f"plugins_{__id__}", f"{__id__}_settings", __id__]
+            for name in pref_names:
+                try:
+                    sp = context.getSharedPreferences(name, 0)
+                    if sp:
+                        all_entries = sp.getAll()
+                        if all_entries:
+                            editor = sp.edit()
+                            has_changes = False
+                            for k in all_entries.keySet().toArray():
+                                key_str = str(k)
+                                if key_str.startswith("__wiz_"):
+                                    if keep_session and key_str.endswith(f"_{keep_session}"):
+                                        continue
+                                    editor.remove(key_str)
+                                    has_changes = True
+                            if has_changes:
+                                editor.commit()
+                except Exception:
+                    pass
+    except Exception as e:
+        log(f"[{__id__}] _clean_wizard_cache: {e}")
+    try:
+        if hasattr(plugin, "settings") and isinstance(plugin.settings, dict):
+            for k in list(plugin.settings.keys()):
+                key_str = str(k)
+                if key_str.startswith("__wiz_"):
+                    if keep_session and key_str.endswith(f"_{keep_session}"):
+                        continue
+                    del plugin.settings[k]
+    except Exception:
+        pass
 
 
 def build_new_wizard(plugin):
@@ -65,6 +126,7 @@ def build_new_wizard(plugin):
             import time
 
             WIZ_SESSION = str(int(time.time() * 1000))
+            _clean_wizard_cache(plugin, keep_session=WIZ_SESSION)
             _init_new_wizard_state(plugin, pids)
             initialized = True
         return _render_wizard(plugin, pids, edit_index=None)
@@ -83,6 +145,7 @@ def build_wizard_step1(plugin, edit_index=None):
             import time
 
             WIZ_SESSION = str(int(time.time() * 1000))
+            _clean_wizard_cache(plugin, keep_session=WIZ_SESSION)
             if edit_index is not None:
                 _init_edit_wizard_state(plugin, edit_index, pids)
             else:
@@ -163,6 +226,7 @@ def _render_wizard(plugin, pids, edit_index=None):
                 text=_s("type"),
                 items=[_s("toggle_plugin"), _s("open_settings"), _s("operate_setting")],
                 default=type_i,
+                on_change=lambda value: _on_type_change(plugin, value, pids, selected_pid),
             )
         )
 
@@ -178,21 +242,28 @@ def _render_wizard(plugin, pids, edit_index=None):
                     sub_default = ctrl.getPluginSettingInt(__id__, f"__wiz_subfragment_{WIZ_SESSION}", 0)
                 except Exception:
                     sub_default = 0
+                if sub_default < 0 or sub_default >= len(sub_titles):
+                    sub_default = 0
                 items.append(Selector(key=f"__wiz_subfragment_{WIZ_SESSION}", text=_s("sub_fragment"), items=sub_titles, default=sub_default))
             items.append(Divider())
             items.extend(build_wizard_step_customize(plugin, pids, "open_settings", sub_keys=sub_keys, edit_index=edit_index))
         elif type_i == 2:
             settings = _collect_settings(selected_pid, ensure_loaded=False)
             if not settings:
-                return [Divider(text=_s("no_settings"))]
-            names = [s.get("text", s.get("key", "")) for s in settings]
-            try:
-                setting_default = ctrl.getPluginSettingInt(__id__, f"__wiz_setting_{WIZ_SESSION}", 0)
-            except Exception:
-                setting_default = 0
-            items.append(Selector(key=f"__wiz_setting_{WIZ_SESSION}", text=_s("select_setting"), items=names, default=setting_default))
-            items.append(Divider())
-            items.extend(build_wizard_step_customize(plugin, pids, "operate_setting", settings=settings, edit_index=edit_index))
+                items.append(Divider(text=_s("no_settings")))
+                items.append(Divider())
+                items.extend(build_wizard_step_customize(plugin, pids, "operate_setting", settings=[], edit_index=edit_index))
+            else:
+                names = [s.get("text", s.get("key", "")) for s in settings]
+                try:
+                    setting_default = ctrl.getPluginSettingInt(__id__, f"__wiz_setting_{WIZ_SESSION}", 0)
+                except Exception:
+                    setting_default = 0
+                if setting_default < 0 or setting_default >= len(names):
+                    setting_default = 0
+                items.append(Selector(key=f"__wiz_setting_{WIZ_SESSION}", text=_s("select_setting"), items=names, default=setting_default))
+                items.append(Divider())
+                items.extend(build_wizard_step_customize(plugin, pids, "operate_setting", settings=settings, edit_index=edit_index))
         else:
             items.append(Divider())
             items.extend(build_wizard_step_customize(plugin, pids, "toggle_plugin", edit_index=edit_index))
@@ -204,12 +275,20 @@ def _render_wizard(plugin, pids, edit_index=None):
     except Exception as e:
         err_msg = f"{e}\n{traceback.format_exc()}"
         log(f"[{__id__}] build_wizard_step1 error: {err_msg}")
-        try:
-            with open(r"d:\.proj\plagins\projects\shortcuts\scratch_error.txt", "w") as f:
-                f.write(err_msg)
-        except Exception:
-            pass
         return [Header(text=_s("add_shortcut")), Divider(text=f"{_s('error')}: {e!s}")]
+
+
+def _on_type_change(plugin, value, pids, selected_pid):
+    try:
+        type_i = int(value)
+        plugin.set_setting(f"__wiz_type_{WIZ_SESSION}", type_i)
+        plugin.set_setting(f"__wiz_subfragment_{WIZ_SESSION}", 0)
+        plugin.set_setting(f"__wiz_setting_{WIZ_SESSION}", 0)
+        if selected_pid:
+            _ctrl().loadPluginSettings(selected_pid)
+        _ctrl().loadPluginSettings(__id__)
+    except Exception as e:
+        log(f"[{__id__}] type change error: {e}")
 
 
 def _on_plugin_change(plugin, value, pids):
@@ -283,7 +362,7 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
                 is_sys = bool(sc_list[edit_index].get("is_system"))
 
             if not locations and not is_sys:
-                run_on_ui_thread(lambda: BulletinHelper.show_error(_s("location_required")))
+                _show_bulletin_error(_s("location_required"))
                 return
             plug_i = ctrl.getPluginSettingInt(__id__, f"__wiz_plugin_{WIZ_SESSION}", 0)
             custom_label = str(ctrl.getPluginSettingString(__id__, f"__wiz_label_{WIZ_SESSION}", "") or "").strip()[:50]
@@ -295,8 +374,14 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
 
             icon_key = _selected_icon_key()
             if not _icon_exists(icon_key):
-                run_on_ui_thread(lambda: BulletinHelper.show_error(_s("icon_not_found")))
+                _show_bulletin_error(_s("icon_not_found"))
                 return
+
+            if not custom_label:
+                if is_sys or pid == __id__:
+                    custom_label = _s("shortcuts")
+                else:
+                    custom_label = _plugin_name(pid)[:50]
 
             if edit_index is not None and 0 <= edit_index < len(sc_list):
                 sc = dict(sc_list[edit_index])
@@ -343,19 +428,12 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
 
             label = _sc_label(sc)
             message_key = "shortcut_updated" if edit_index is not None else "shortcut_created"
-            run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s(message_key)}: {label}"))
-            run_on_ui_thread(lambda: _finish_wizard_fragment(wizard_fragment))
+            _finish_and_show_success(wizard_fragment, f"{_s(message_key)}: {label}")
             threading.Thread(target=lambda: _reload_settings_after_wizard(ctrl), daemon=True).start()
         except Exception as e:
             err_msg = f"{e}\n{traceback.format_exc()}"
             log(f"[{__id__}] wizard_finalize error: {err_msg}")
-            try:
-                with open(r"d:\.proj\plagins\projects\shortcuts\scratch_error.txt", "w") as f:
-                    f.write(err_msg)
-            except Exception:
-                pass
-            err_str = str(e)
-            run_on_ui_thread(lambda err=err_str: BulletinHelper.show_error(err))
+            _show_bulletin_error(str(e))
 
     threading.Thread(target=_do, daemon=True).start()
 
@@ -445,14 +523,14 @@ def _icon_title(icon_key):
 def _save_selected_icon(plugin, icon_key):
     icon_key = str(icon_key or "").strip()
     if not _icon_exists(icon_key):
-        run_on_ui_thread(lambda: BulletinHelper.show_error(_s("icon_not_found")))
+        _show_bulletin_error(_s("icon_not_found"))
         return
     try:
         ctrl = _ctrl()
         plugin.set_setting(f"__wiz_icon_{WIZ_SESSION}", icon_key)
         plugin.set_setting(f"__wiz_custom_icon_{WIZ_SESSION}", "")
         ctrl.loadPluginSettings(__id__)
-        run_on_ui_thread(lambda: BulletinHelper.show_success(f"{_s('icon_selected')}: {_icon_title(icon_key)}"))
+        _show_bulletin_success(f"{_s('icon_selected')}: {_icon_title(icon_key)}")
     except Exception as e:
         log(f"[{__id__}] select icon error: {e}")
 
