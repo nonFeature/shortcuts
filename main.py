@@ -111,7 +111,6 @@ class ShortcutsPlugin(BasePlugin):
         self._safe_settings_data = SafeSettingsDict()
         super().__init__()
         self._menu_items = []
-        self._qa_mid = None
         self._deeplink_unhook = None
         self._sanitize_settings()
 
@@ -130,14 +129,6 @@ class ShortcutsPlugin(BasePlugin):
             for k, v in value.items():
                 if k is not None and v is not None and not str(k).startswith("__wiz_"):
                     self._safe_settings_data[str(k)] = v
-
-    @property
-    def _settings(self):
-        return self.settings
-
-    @_settings.setter
-    def _settings(self, value):
-        self.settings = value
 
     def on_plugin_load(self):
         try:
@@ -205,8 +196,6 @@ class ShortcutsPlugin(BasePlugin):
 
     def on_plugin_unload(self):
         self._clear_menu_items()
-        _remove_menu_item_safe(self, self._qa_mid)
-        self._qa_mid = None
         if self._deeplink_unhook:
             try:
                 if isinstance(self._deeplink_unhook, list):
@@ -226,19 +215,6 @@ class ShortcutsPlugin(BasePlugin):
         except Exception as e:
             log(f"[{__id__}] create_settings: {e}\n{traceback.format_exc()}")
             return [Header(text=_s("shortcuts")), Divider(text=str(e))]
-
-    def _open_self_settings(self):
-        def _do():
-            try:
-                plugin = _ctrl().plugins.get(__id__)
-                if plugin:
-                    frag = get_last_fragment()
-                    if frag:
-                        frag.presentFragment(PluginSettingsActivity(plugin))
-            except Exception as e:
-                log(f"[{__id__}] _open_self_settings: {e}")
-
-        run_on_ui_thread(_do)
 
     # ========== EXECUTION ==========
     def _exec_shortcut(self, sc):

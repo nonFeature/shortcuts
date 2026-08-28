@@ -19,7 +19,7 @@ from utils.helpers import (
     _show_bulletin_error,
     _show_bulletin_success,
 )
-from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settings_reliably, _plugin_ids
+from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settings, _plugin_ids
 
 LOCATION_KEYS = ("drawer", "chat", "message", "profile")
 
@@ -123,7 +123,6 @@ def build_new_wizard(plugin):
         pids = _plugin_ids()
         if not initialized:
             global WIZ_SESSION
-            import time
 
             WIZ_SESSION = str(int(time.time() * 1000))
             _clean_wizard_cache(plugin, keep_session=WIZ_SESSION)
@@ -142,7 +141,6 @@ def build_wizard_step1(plugin, edit_index=None):
         pids = _plugin_ids()
         if not initialized:
             global WIZ_SESSION
-            import time
 
             WIZ_SESSION = str(int(time.time() * 1000))
             _clean_wizard_cache(plugin, keep_session=WIZ_SESSION)
@@ -207,7 +205,7 @@ def _render_wizard(plugin, pids, edit_index=None):
         )
         items.append(Divider())
 
-        if not _has_settings_reliably(selected_pid):
+        if not _has_settings(selected_pid):
             items.append(Divider(text=_s("toggle_only_warning")))
             items.append(Divider())
             items.extend(build_wizard_step_customize(plugin, pids, "toggle_plugin", edit_index=edit_index))
@@ -438,15 +436,6 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
     threading.Thread(target=_do, daemon=True).start()
 
 
-def _finish_wizard_fragment(fragment=None):
-    try:
-        fragment = fragment or get_last_fragment()
-        if fragment:
-            fragment.finishFragment()
-    except Exception as e:
-        log(f"[{__id__}] close wizard fragment: {e}")
-
-
 def _get_setting_string(key, default=""):
     try:
         return str(_ctrl().getPluginSettingString(__id__, key, default) or "").strip()
@@ -535,10 +524,6 @@ def _save_selected_icon(plugin, icon_key):
         log(f"[{__id__}] select icon error: {e}")
 
 
-def _remember_custom_icon(value):
-    return None
-
-
 def build_icon_picker(plugin):
     items = []
     for icon_key, title_key in PRESET_ICONS:
@@ -557,7 +542,6 @@ def build_icon_picker(plugin):
             text=_s("custom_icon_name"),
             subtext=_s("custom_icon_name_sub"),
             default=custom_key,
-            on_change=_remember_custom_icon,
         )
     )
     if custom_key:

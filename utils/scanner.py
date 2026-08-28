@@ -231,10 +231,6 @@ def _get_settings_list(pid, ensure_loaded=False):
     return None
 
 
-def _has_settings_reliably(pid):
-    return _has_settings(pid)
-
-
 def _collect_sub_fragments(pid, ensure_loaded=True):
     out = []
     if pid == __id__:

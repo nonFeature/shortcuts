@@ -6,7 +6,6 @@ from base_plugin import MethodHook
 from client_utils import log
 from java import dynamic_proxy, jclass
 from org.telegram.messenger import AndroidUtilities
-from ui.bulletin import BulletinHelper
 
 from header import __id__
 from i18n.locales import _s
@@ -69,7 +68,7 @@ def _handle_deeplink(plugin, url_str):
 
             pid = str(uri.getQueryParameter("plugin_id") or "").strip()
             if not pid:
-                run_on_ui_thread(lambda: BulletinHelper.show_error(_s("invalid_deeplink")))
+                _show_bulletin_error(_s("invalid_deeplink"))
                 return
 
             stype = str(uri.getQueryParameter("type") or "toggle_plugin").strip()
