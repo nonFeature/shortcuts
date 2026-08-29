@@ -293,3 +293,67 @@ def _sc_label(sc):
     elif t == "operate_setting":
         return f"{pname}: {_shortcut_title(sc)}"[:50]
     return str(pname)[:50]
+
+
+def _get_shortcut_state(sc):
+    try:
+        t = sc.get("type", "toggle_plugin")
+        pid = sc.get("plugin_id", "")
+        if t == "toggle_plugin":
+            p = _ctrl().plugins.get(pid)
+            if p:
+                enabled = bool(p.isEnabled())
+                return (enabled, _s("status_on") if enabled else _s("status_off"))
+            return (False, _s("status_off"))
+        elif t == "operate_setting":
+            st = sc.get("setting_type", "switch")
+            vk = _setting_value_key(sc)
+            if st == "switch":
+                val = bool(_ctrl().getPluginSettingBoolean(pid, vk, False))
+                return (val, _s("status_on") if val else _s("status_off"))
+            elif st == "selector":
+                cur = _ctrl().getPluginSettingInt(pid, vk, 0)
+                opts = sc.get("setting_items") or sc.get("items") or []
+                if 0 <= int(cur) < len(opts):
+                    return (None, str(opts[int(cur)]))
+                return (None, str(cur))
+            elif st == "input":
+                val = str(_ctrl().getPluginSettingString(pid, vk, "") or "")
+                return (None, val)
+    except Exception:
+        pass
+    return (None, "")
+
+
+def _sc_status_text(sc):
+    _, text = _get_shortcut_state(sc)
+    return text
+
+
+def _sc_subtext(sc):
+    loc_str = _loc_label(sc)
+    if sc.get("is_system"):
+        return loc_str
+    t = sc.get("type", "toggle_plugin")
+    type_descriptions = {
+        "toggle_plugin": _s("toggle_plugin"),
+        "open_settings": _s("open_settings"),
+        "operate_setting": _s("operate_setting"),
+    }
+    type_desc = type_descriptions.get(t, "")
+    parts = []
+    if type_desc:
+        parts.append(type_desc)
+    if loc_str:
+        parts.append(loc_str)
+    return " • ".join(parts)
+
+
+def _sc_menu_label(sc):
+    base_label = str(sc.get("label") or _sc_label(sc))[:50]
+    if sc.get("is_system"):
+        return (base_label, None)
+    _, state_text = _get_shortcut_state(sc)
+    if state_text:
+        return (f"{base_label}: {state_text}"[:60], state_text)
+    return (base_label, None)

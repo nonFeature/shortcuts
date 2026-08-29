@@ -311,8 +311,9 @@ def _on_plugin_change(plugin, value, pids):
 
 def build_wizard_step_customize(plugin, pids, stype, sub_keys=None, settings=None, edit_index=None):
     items = []
+    ctrl = _ctrl()
     try:
-        plug_i = _ctrl().getPluginSettingInt(__id__, f"__wiz_plugin_{WIZ_SESSION}", 0)
+        plug_i = ctrl.getPluginSettingInt(__id__, f"__wiz_plugin_{WIZ_SESSION}", 0)
     except Exception:
         plug_i = 0
     if plug_i < 0 or plug_i >= len(pids):
@@ -390,9 +391,25 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
                     # Preserve original type and pid for system shortcuts
                     sc.update({"location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key})
                 else:
-                    sc.update({"type": stype, "plugin_id": pid, "location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key})
+                    sc.update(
+                        {
+                            "type": stype,
+                            "plugin_id": pid,
+                            "location": legacy_location,
+                            "locations": locations,
+                            "label": custom_label,
+                            "icon": icon_key,
+                        }
+                    )
             else:
-                sc = {"type": stype, "plugin_id": pid, "location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key}
+                sc = {
+                    "type": stype,
+                    "plugin_id": pid,
+                    "location": legacy_location,
+                    "locations": locations,
+                    "label": custom_label,
+                    "icon": icon_key,
+                }
 
             if stype == "open_settings" and sub_keys:
                 sub_i = ctrl.getPluginSettingInt(__id__, f"__wiz_subfragment_{WIZ_SESSION}", 0)

@@ -88,6 +88,12 @@ def _handle_deeplink(plugin, url_str):
                 "label": label,
                 "icon": icon if icon else "media_settings",
             }
+            raw_status = uri.getQueryParameter("show_status")
+            if raw_status is not None:
+                sc["show_status"] = str(raw_status).strip() not in ("0", "false", "False")
+            else:
+                sc["show_status"] = True
+
             if locations:
                 valid_locations = [loc_item for loc_item in locations if loc_item in ("drawer", "chat", "message", "profile")]
                 if valid_locations:
@@ -230,6 +236,8 @@ def _generate_deeplink(plugin, sc):
             "icon": ic,
             "location": loc,
         }
+        if sc.get("show_status") is not None:
+            params["show_status"] = "1" if sc.get("show_status") else "0"
 
         raw_locations = sc.get("locations")
         if isinstance(raw_locations, (list, tuple)):

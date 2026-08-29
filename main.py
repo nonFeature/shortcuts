@@ -1,12 +1,14 @@
 import json
 import threading
+import time
 import traceback
 
 from android_utils import run_on_ui_thread
 from base_plugin import BasePlugin, MenuItemData, MenuItemType
 from client_utils import get_last_fragment, log
 from com.exteragram.messenger.plugins.ui import PluginsActivity, PluginSettingsActivity
-from org.telegram.messenger import ApplicationLoader
+from java import dynamic_proxy, jclass
+from org.telegram.messenger import ApplicationLoader, NotificationCenter
 
 from features.deeplink import register_deeplink_hook
 from header import __id__
@@ -14,12 +16,12 @@ from i18n.locales import _s
 from ui.settings import Divider, Header, build_settings_list, show_input_dialog, show_selector_dialog
 from utils.helpers import (
     _ctrl,
-    _finish_and_show_success,
     _plugin_exists,
     _plugin_name,
     _remove_menu_item_safe,
     _sc_label,
     _sc_locations,
+    _sc_menu_label,
     _setting_value_key,
     _shortcut_title,
     _show_bulletin_error,
@@ -106,12 +108,32 @@ class SafeSettingsDict(dict):
         return [k for k, v in super().items() if k is not None and v is not None and not str(k).startswith("__wiz_")]
 
 
+try:
+    ObserverDelegate = dynamic_proxy(jclass("org.telegram.messenger.NotificationCenter$NotificationCenterDelegate"))
+
+    class ShortcutsNotificationObserver(ObserverDelegate):
+        def __init__(self, plugin):
+            super().__init__()
+            self.plugin = plugin
+
+        def didReceivedNotification(self, notification_id, account, *args):
+            try:
+                self.plugin._restore_shortcuts()
+            except Exception as e:
+                log(f"[{__id__}] notification refresh error: {e}")
+
+except Exception as e:
+    log(f"[{__id__}] define ShortcutsNotificationObserver: {e}")
+    ShortcutsNotificationObserver = None
+
+
 class ShortcutsPlugin(BasePlugin):
     def __init__(self):
         self._safe_settings_data = SafeSettingsDict()
         super().__init__()
         self._menu_items = []
         self._deeplink_unhook = None
+        self._observer = None
         self._sanitize_settings()
 
     @property
@@ -134,6 +156,14 @@ class ShortcutsPlugin(BasePlugin):
         try:
             self._sanitize_settings()
             self._restore_shortcuts()
+            if ShortcutsNotificationObserver is not None:
+                try:
+                    self._observer = ShortcutsNotificationObserver(self)
+                    NotificationCenter.getGlobalInstance().addObserver(self._observer, NotificationCenter.pluginsUpdated)
+                    NotificationCenter.getGlobalInstance().addObserver(self._observer, NotificationCenter.pluginSettingsRegistered)
+                    NotificationCenter.getGlobalInstance().addObserver(self._observer, NotificationCenter.pluginSettingsUnregistered)
+                except Exception as ex:
+                    log(f"[{__id__}] addObserver error: {ex}")
             threading.Thread(target=self._register_deeplink_hook_async, daemon=True).start()
         except Exception as e:
             log(f"[{__id__}] on_plugin_load: {e}")
@@ -196,6 +226,14 @@ class ShortcutsPlugin(BasePlugin):
 
     def on_plugin_unload(self):
         self._clear_menu_items()
+        if hasattr(self, "_observer") and self._observer is not None:
+            try:
+                NotificationCenter.getGlobalInstance().removeObserver(self._observer, NotificationCenter.pluginsUpdated)
+                NotificationCenter.getGlobalInstance().removeObserver(self._observer, NotificationCenter.pluginSettingsRegistered)
+                NotificationCenter.getGlobalInstance().removeObserver(self._observer, NotificationCenter.pluginSettingsUnregistered)
+            except Exception:
+                pass
+            self._observer = None
         if self._deeplink_unhook:
             try:
                 if isinstance(self._deeplink_unhook, list):
@@ -262,6 +300,11 @@ class ShortcutsPlugin(BasePlugin):
                         value = not bool(cur)
                         _ctrl().setPluginSetting(pid, vk, value)
                         _trigger_setting_on_change(pid, sc, value)
+                        self._restore_shortcuts()
+                        try:
+                            _ctrl().loadPluginSettings(__id__)
+                        except Exception:
+                            pass
                         _show_bulletin_success(f"{_plugin_name(pid)}: {('ON' if value else 'OFF')}")
                     elif st == "selector":
                         opts = sc.get("setting_items") or sc.get("items") or []
@@ -299,12 +342,42 @@ class ShortcutsPlugin(BasePlugin):
     def _toggle(self, pid, pname, enabled):
         def _do():
             try:
-                _ctrl().setPluginEnabled(pid, enabled, None)
-                msg = f"{pname}: ON" if enabled else f"{pname}: OFF"
-                _show_bulletin_success(msg)
+                CallbackClass = jclass("org.telegram.messenger.Utilities$Callback")
+                Callback = dynamic_proxy(CallbackClass)
+
+                class ToggleCb(Callback):
+                    def __init__(self, plugin_ref):
+                        super().__init__()
+                        self.plugin_ref = plugin_ref
+
+                    def run(self, err):
+                        self.plugin_ref._restore_shortcuts()
+                        try:
+                            _ctrl().loadPluginSettings(__id__)
+                        except Exception:
+                            pass
+                        if err:
+                            _show_bulletin_error(str(err))
+                        else:
+                            msg = f"{pname}: ON" if enabled else f"{pname}: OFF"
+                            _show_bulletin_success(msg)
+
+                _ctrl().setPluginEnabled(pid, enabled, ToggleCb(self))
             except Exception as e:
-                log(f"[{__id__}] toggle {pid}: {e}")
-                _show_bulletin_error(str(e))
+                log(f"[{__id__}] toggle callback error: {e}")
+                try:
+                    _ctrl().setPluginEnabled(pid, enabled, None)
+                    time.sleep(0.15)
+                    self._restore_shortcuts()
+                    try:
+                        _ctrl().loadPluginSettings(__id__)
+                    except Exception:
+                        pass
+                    msg = f"{pname}: ON" if enabled else f"{pname}: OFF"
+                    _show_bulletin_success(msg)
+                except Exception as ex:
+                    log(f"[{__id__}] toggle fallback error: {ex}")
+                    _show_bulletin_error(str(ex))
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -434,7 +507,7 @@ class ShortcutsPlugin(BasePlugin):
         self._menu_items = []
 
     def _register_menu(self, sc, priority=10):
-        label = str(sc.get("label") or _sc_label(sc))[:50]
+        label, subtext = _sc_menu_label(sc)
         icon = sc.get("icon") or "media_settings"
         menu_type_by_location = {
             "drawer": MenuItemType.DRAWER_MENU,
@@ -448,6 +521,7 @@ class ShortcutsPlugin(BasePlugin):
                 MenuItemData(
                     menu_type=mt,
                     text=label,
+                    subtext=subtext,
                     icon=icon,
                     priority=priority,
                     on_click=lambda ctx, _sc=sc: self._exec_shortcut(_sc),
@@ -456,14 +530,32 @@ class ShortcutsPlugin(BasePlugin):
             if mid:
                 self._menu_items.append(mid)
 
+    def _move_shortcut(self, idx, direction):
+        sc_list = self._load_shortcuts()
+        target_idx = idx + direction
+        if 0 <= idx < len(sc_list) and 0 <= target_idx < len(sc_list):
+            if sc_list[idx].get("is_system") or sc_list[target_idx].get("is_system"):
+                return
+            sc_list[idx], sc_list[target_idx] = sc_list[target_idx], sc_list[idx]
+            self._save_shortcuts(sc_list)
+            self._restore_shortcuts()
+            _show_bulletin_success(_s("shortcut_reordered"))
+            try:
+                _ctrl().loadPluginSettings(__id__)
+            except Exception as e:
+                log(f"[{__id__}] move reload error: {e}")
+
     def _remove_shortcut(self, idx):
         sc_list = self._load_shortcuts()
         if 0 <= idx < len(sc_list):
             if sc_list[idx].get("is_system"):
+                _show_bulletin_error(_s("cannot_remove_system"))
                 return
-            sc_list.pop(idx)
+            removed = sc_list.pop(idx)
             self._save_shortcuts(sc_list)
             self._restore_shortcuts()
-
-            _finish_and_show_success(None, _s("shortcut_removed"))
-            _ctrl().loadPluginSettings(__id__)
+            _show_bulletin_success(f"{_s('shortcut_removed')}: {_sc_label(removed)}")
+            try:
+                _ctrl().loadPluginSettings(__id__)
+            except Exception as e:
+                log(f"[{__id__}] remove reload error: {e}")

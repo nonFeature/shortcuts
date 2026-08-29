@@ -14,6 +14,8 @@ from utils.helpers import (
     _dialog_context,
     _plugin_name,
     _sc_label,
+    _sc_status_text,
+    _sc_subtext,
     _show_bulletin_error,
     _show_bulletin_success,
     _show_dialog_safe,
@@ -28,20 +30,25 @@ def build_settings_list(plugin):
     for i, sc in enumerate(shortcuts):
         label = _sc_label(sc)
         pid = sc.get("plugin_id", "")
+        subtext = _sc_subtext(sc)
         if sc.get("is_system"):
             settings.append(
                 Text(
                     text=label,
+                    subtext=subtext,
                     icon=sc.get("icon") or "media_settings",
                     create_sub_fragment=build_wizard_step1(plugin, edit_index=i),
                 )
             )
             settings.append(Divider())
         else:
-            display_text = f"{label} [{pid}]" if pid else label
+            st_text = _sc_status_text(sc)
+            status_suffix = f": {st_text}" if st_text else ""
+            display_text = f"{label}{status_suffix} [{pid}]" if pid else f"{label}{status_suffix}"
             settings.append(
                 Text(
                     text=display_text,
+                    subtext=subtext,
                     icon=sc.get("icon") or "media_settings",
                     create_sub_fragment=lambda _i=i, _sc=sc: build_shortcut_actions(plugin, _i, _sc),
                 )
@@ -81,6 +88,23 @@ def build_shortcut_actions(plugin, index, initial_sc=None):
     ]
     curr_sc = _get_current_shortcut(plugin, index, initial_sc)
     if not curr_sc.get("is_system"):
+        if index > 1:
+            actions.append(
+                Text(
+                    text=_s("move_up"),
+                    icon="msg_arrow_up",
+                    on_click=lambda _value: plugin._move_shortcut(index, -1),
+                )
+            )
+        shortcuts = plugin._load_shortcuts()
+        if index < len(shortcuts) - 1:
+            actions.append(
+                Text(
+                    text=_s("move_down"),
+                    icon="msg_arrow_down",
+                    on_click=lambda _value: plugin._move_shortcut(index, 1),
+                )
+            )
         actions.append(Text(text=_s("remove_shortcut"), icon="msg_delete", red=True, on_click=lambda _value: plugin._remove_shortcut(index)))
     return actions
 
@@ -121,6 +145,7 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
                             _ctrl().setPluginSetting(pid, key, value)
                             if sc:
                                 _trigger_setting_on_change(pid, sc, value)
+                            plugin._restore_shortcuts()
                             _show_bulletin_success(f"{_plugin_name(pid)}: {opts[idx]}")
                         except Exception as e:
                             log(f"[{__id__}] selector dialog save: {e}")
@@ -205,6 +230,7 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
                         _ctrl().setPluginSetting(pid, key, value)
                         if sc:
                             _trigger_setting_on_change(pid, sc, value)
+                        plugin._restore_shortcuts()
                         _show_bulletin_success(f"{_plugin_name(pid)}: {value}")
                     except Exception as e:
                         log(f"[{__id__}] input dialog save: {e}")
