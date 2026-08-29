@@ -31,13 +31,14 @@ def build_settings_list(plugin):
         label = _sc_label(sc)
         pid = sc.get("plugin_id", "")
         subtext = _sc_subtext(sc)
+        sc_id = sc.get("id") or f"__sc_{i}__"
         if sc.get("is_system"):
             settings.append(
                 Text(
                     text=label,
                     subtext=subtext,
                     icon=sc.get("icon") or "media_settings",
-                    create_sub_fragment=build_wizard_step1(plugin, edit_index=i),
+                    create_sub_fragment=build_wizard_step1(plugin, edit_id=sc_id, edit_index=i),
                 )
             )
             settings.append(Divider())
@@ -50,7 +51,7 @@ def build_settings_list(plugin):
                     text=display_text,
                     subtext=subtext,
                     icon=sc.get("icon") or "media_settings",
-                    create_sub_fragment=lambda _i=i, _sc=sc: build_shortcut_actions(plugin, _i, _sc),
+                    create_sub_fragment=build_shortcut_actions(plugin, sc_id, initial_sc=sc),
                 )
             )
     settings.append(Text(text=_s("add_shortcut"), accent=True, create_sub_fragment=build_new_wizard(plugin)))
@@ -58,55 +59,70 @@ def build_settings_list(plugin):
     return settings
 
 
-def _get_current_shortcut(plugin, index, fallback_sc=None):
-    try:
+def build_shortcut_actions(plugin, sc_id, initial_sc=None):
+    def _render():
         shortcuts = plugin._load_shortcuts()
-        if 0 <= index < len(shortcuts):
-            return shortcuts[index]
-    except Exception:
-        pass
-    return fallback_sc or {}
+        cur_idx = -1
+        curr_sc = None
+        for idx, s in enumerate(shortcuts):
+            if s.get("id") == sc_id:
+                cur_idx = idx
+                curr_sc = s
+                break
+        if curr_sc is None:
+            if initial_sc and isinstance(initial_sc, dict):
+                curr_sc = initial_sc
+            else:
+                return [Text(text=_s("shortcut_not_found"))]
 
+        def _do_exec(_value):
+            plugin._exec_shortcut(curr_sc)
 
-def build_shortcut_actions(plugin, index, initial_sc=None):
-    def _do_exec(_value):
-        sc = _get_current_shortcut(plugin, index, initial_sc)
-        plugin._exec_shortcut(sc)
+        def _do_copy(_value):
+            copy_deeplink(plugin, curr_sc)
 
-    def _do_copy(_value):
-        sc = _get_current_shortcut(plugin, index, initial_sc)
-        copy_deeplink(plugin, sc)
-
-    actions = [
-        Text(text=_s("open_shortcut"), icon="msg_share", on_click=_do_exec),
-        Text(
-            text=_s("edit_shortcut"),
-            icon="msg_edit",
-            create_sub_fragment=build_wizard_step1(plugin, edit_index=index),
-        ),
-        Text(text=_s("copy_deeplink"), icon="msg_copy", on_click=_do_copy),
-    ]
-    curr_sc = _get_current_shortcut(plugin, index, initial_sc)
-    if not curr_sc.get("is_system"):
-        if index > 1:
+        actions = [
+            Text(text=_s("open_shortcut"), icon="msg_share", on_click=_do_exec),
+            Text(
+                text=_s("edit_shortcut"),
+                icon="msg_edit",
+                create_sub_fragment=build_wizard_step1(plugin, edit_id=sc_id),
+            ),
+            Text(text=_s("copy_deeplink"), icon="msg_copy", on_click=_do_copy),
+        ]
+        if not curr_sc.get("is_system"):
             actions.append(
                 Text(
-                    text=_s("move_up"),
-                    icon="msg_arrow_up",
-                    on_click=lambda _value: plugin._move_shortcut(index, -1),
+                    text=_s("remove_shortcut"),
+                    icon="msg_delete",
+                    red=True,
+                    on_click=lambda _value: plugin._remove_shortcut_by_id(sc_id),
                 )
             )
-        shortcuts = plugin._load_shortcuts()
-        if index < len(shortcuts) - 1:
-            actions.append(
-                Text(
-                    text=_s("move_down"),
-                    icon="msg_arrow_down",
-                    on_click=lambda _value: plugin._move_shortcut(index, 1),
+
+            move_actions = []
+            if cur_idx > 1:
+                move_actions.append(
+                    Text(
+                        text=_s("move_up"),
+                        icon="tooltip_arrow_up",
+                        on_click=lambda _value: plugin._move_shortcut_by_id(sc_id, -1),
+                    )
                 )
-            )
-        actions.append(Text(text=_s("remove_shortcut"), icon="msg_delete", red=True, on_click=lambda _value: plugin._remove_shortcut(index)))
-    return actions
+            if 0 <= cur_idx < len(shortcuts) - 1:
+                move_actions.append(
+                    Text(
+                        text=_s("move_down"),
+                        icon="tooltip_arrow",
+                        on_click=lambda _value: plugin._move_shortcut_by_id(sc_id, 1),
+                    )
+                )
+            if move_actions:
+                actions.append(Divider())
+                actions.extend(move_actions)
+        return actions
+
+    return _render
 
 
 def show_selector_dialog(plugin, pid, key, title, items, sc=None):
@@ -146,6 +162,10 @@ def show_selector_dialog(plugin, pid, key, title, items, sc=None):
                             if sc:
                                 _trigger_setting_on_change(pid, sc, value)
                             plugin._restore_shortcuts()
+                            try:
+                                _ctrl().loadPluginSettings(__id__)
+                            except Exception:
+                                pass
                             _show_bulletin_success(f"{_plugin_name(pid)}: {opts[idx]}")
                         except Exception as e:
                             log(f"[{__id__}] selector dialog save: {e}")
@@ -231,6 +251,10 @@ def show_input_dialog(plugin, pid, key, title, sc=None):
                         if sc:
                             _trigger_setting_on_change(pid, sc, value)
                         plugin._restore_shortcuts()
+                        try:
+                            _ctrl().loadPluginSettings(__id__)
+                        except Exception:
+                            pass
                         _show_bulletin_success(f"{_plugin_name(pid)}: {value}")
                     except Exception as e:
                         log(f"[{__id__}] input dialog save: {e}")

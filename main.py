@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import traceback
+import uuid
 
 from android_utils import run_on_ui_thread
 from base_plugin import BasePlugin, MenuItemData, MenuItemType
@@ -453,28 +454,34 @@ class ShortcutsPlugin(BasePlugin):
             raw = []
         normalized = []
         has_system = False
-        for sc in raw:
+        has_changes = False
+
+        for _i, sc in enumerate(raw):
             if not isinstance(sc, dict):
                 continue
+            sc = dict(sc)
             if sc.get("is_system"):
                 has_system = True
+                sc["id"] = "__system_shortcuts__"
                 label_val = str(sc.get("label", "") or "").strip()
                 if not label_val or label_val == "shortcuts":
-                    sc = dict(sc)
                     sc["label"] = _s("shortcuts")
+            else:
+                if not sc.get("id"):
+                    sc["id"] = uuid.uuid4().hex[:10]
+                    has_changes = True
+
             if sc.get("type") == "operate_setting" and isinstance(sc.get("setting"), dict):
                 ref = sc.get("setting") or {}
-                merged = dict(sc)
-                merged["setting_key"] = merged.get("setting_key", ref.get("key", ""))
-                merged["setting_value_key"] = merged.get("setting_value_key", ref.get("value_key", ref.get("key", "")))
-                merged["setting_open_key"] = merged.get("setting_open_key", ref.get("open_key", merged["setting_key"]))
-                merged["setting_type"] = merged.get("setting_type", ref.get("type", "switch"))
-                normalized.append(merged)
-                continue
+                sc["setting_key"] = sc.get("setting_key", ref.get("key", ""))
+                sc["setting_value_key"] = sc.get("setting_value_key", ref.get("value_key", ref.get("key", "")))
+                sc["setting_open_key"] = sc.get("setting_open_key", ref.get("open_key", sc["setting_key"]))
+                sc["setting_type"] = sc.get("setting_type", ref.get("type", "switch"))
             normalized.append(sc)
 
         if not has_system:
             system_sc = {
+                "id": "__system_shortcuts__",
                 "type": "open_settings",
                 "plugin_id": __id__,
                 "location": "drawer",
@@ -484,6 +491,9 @@ class ShortcutsPlugin(BasePlugin):
                 "is_system": True,
             }
             normalized.insert(0, system_sc)
+            has_changes = True
+
+        if has_changes:
             self._save_shortcuts(normalized)
 
         return normalized
@@ -530,8 +540,15 @@ class ShortcutsPlugin(BasePlugin):
             if mid:
                 self._menu_items.append(mid)
 
-    def _move_shortcut(self, idx, direction):
+    def _move_shortcut_by_id(self, sc_id, direction):
         sc_list = self._load_shortcuts()
+        idx = -1
+        for i, sc in enumerate(sc_list):
+            if sc.get("id") == sc_id:
+                idx = i
+                break
+        if idx == -1:
+            return
         target_idx = idx + direction
         if 0 <= idx < len(sc_list) and 0 <= target_idx < len(sc_list):
             if sc_list[idx].get("is_system") or sc_list[target_idx].get("is_system"):
@@ -545,17 +562,37 @@ class ShortcutsPlugin(BasePlugin):
             except Exception as e:
                 log(f"[{__id__}] move reload error: {e}")
 
+    def _move_shortcut(self, idx, direction):
+        sc_list = self._load_shortcuts()
+        if 0 <= idx < len(sc_list):
+            sc_id = sc_list[idx].get("id")
+            if sc_id:
+                self._move_shortcut_by_id(sc_id, direction)
+
+    def _remove_shortcut_by_id(self, sc_id):
+        sc_list = self._load_shortcuts()
+        idx = -1
+        for i, sc in enumerate(sc_list):
+            if sc.get("id") == sc_id:
+                idx = i
+                break
+        if idx == -1:
+            return
+        if sc_list[idx].get("is_system"):
+            _show_bulletin_error(_s("cannot_remove_system"))
+            return
+        removed = sc_list.pop(idx)
+        self._save_shortcuts(sc_list)
+        self._restore_shortcuts()
+        _show_bulletin_success(f"{_s('shortcut_removed')}: {_sc_label(removed)}")
+        try:
+            _ctrl().loadPluginSettings(__id__)
+        except Exception as e:
+            log(f"[{__id__}] remove reload error: {e}")
+
     def _remove_shortcut(self, idx):
         sc_list = self._load_shortcuts()
         if 0 <= idx < len(sc_list):
-            if sc_list[idx].get("is_system"):
-                _show_bulletin_error(_s("cannot_remove_system"))
-                return
-            removed = sc_list.pop(idx)
-            self._save_shortcuts(sc_list)
-            self._restore_shortcuts()
-            _show_bulletin_success(f"{_s('shortcut_removed')}: {_sc_label(removed)}")
-            try:
-                _ctrl().loadPluginSettings(__id__)
-            except Exception as e:
-                log(f"[{__id__}] remove reload error: {e}")
+            sc_id = sc_list[idx].get("id")
+            if sc_id:
+                self._remove_shortcut_by_id(sc_id)

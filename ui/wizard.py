@@ -1,6 +1,7 @@
 import threading
 import time
 import traceback
+import uuid
 
 from client_utils import get_last_fragment, log
 from org.telegram.messenger import ApplicationLoader
@@ -24,6 +25,17 @@ from utils.scanner import _collect_settings, _collect_sub_fragments, _has_settin
 LOCATION_KEYS = ("drawer", "chat", "message", "profile")
 
 
+def _find_sc_index(plugin, edit_index=None, edit_id=None):
+    shortcuts = plugin._load_shortcuts()
+    if edit_id:
+        for idx, sc in enumerate(shortcuts):
+            if sc.get("id") == edit_id:
+                return idx
+    if edit_index is not None and 0 <= edit_index < len(shortcuts):
+        return edit_index
+    return None
+
+
 def _init_new_wizard_state(plugin, pids):
     selected_pid = pids[0] if pids else ""
     for location_key in LOCATION_KEYS:
@@ -39,7 +51,7 @@ def _init_new_wizard_state(plugin, pids):
 
 def _init_edit_wizard_state(plugin, edit_index, pids):
     shortcuts = plugin._load_shortcuts()
-    if not (0 <= edit_index < len(shortcuts)):
+    if edit_index is None or not (0 <= edit_index < len(shortcuts)):
         return
     sc = shortcuts[edit_index]
     pid = sc.get("plugin_id", "")
@@ -133,23 +145,24 @@ def build_new_wizard(plugin):
     return _render
 
 
-def build_wizard_step1(plugin, edit_index=None):
+def build_wizard_step1(plugin, edit_index=None, edit_id=None):
     initialized = False
 
     def _render():
         nonlocal initialized
         pids = _plugin_ids()
+        current_idx = _find_sc_index(plugin, edit_index, edit_id)
         if not initialized:
             global WIZ_SESSION
 
             WIZ_SESSION = str(int(time.time() * 1000))
             _clean_wizard_cache(plugin, keep_session=WIZ_SESSION)
-            if edit_index is not None:
-                _init_edit_wizard_state(plugin, edit_index, pids)
+            if current_idx is not None:
+                _init_edit_wizard_state(plugin, current_idx, pids)
             else:
                 _init_new_wizard_state(plugin, pids)
             initialized = True
-        return _render_wizard(plugin, pids, edit_index=edit_index)
+        return _render_wizard(plugin, pids, edit_index=current_idx)
 
     return _render
 
@@ -357,8 +370,10 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
 
             sc_list = plugin._load_shortcuts()
             is_sys = False
+            existing_id = None
             if edit_index is not None and 0 <= edit_index < len(sc_list):
                 is_sys = bool(sc_list[edit_index].get("is_system"))
+                existing_id = sc_list[edit_index].get("id")
 
             if not locations and not is_sys:
                 _show_bulletin_error(_s("location_required"))
@@ -388,7 +403,6 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
                     sc.pop(key, None)
 
                 if sc.get("is_system"):
-                    # Preserve original type and pid for system shortcuts
                     sc.update({"location": legacy_location, "locations": locations, "label": custom_label, "icon": icon_key})
                 else:
                     sc.update(
@@ -401,8 +415,11 @@ def wizard_finalize(plugin, pids, stype, sub_keys=None, settings=None, edit_inde
                             "icon": icon_key,
                         }
                     )
+                if existing_id:
+                    sc["id"] = existing_id
             else:
                 sc = {
+                    "id": uuid.uuid4().hex[:10],
                     "type": stype,
                     "plugin_id": pid,
                     "location": legacy_location,
